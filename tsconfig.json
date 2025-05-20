@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",                       
+    "module": "commonjs",                     
+    "moduleResolution": "node",               
+    "strict": true,                           
+    "esModuleInterop": true,                  
+    "skipLibCheck": true,                     
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",                       
+    "rootDir": "./",                          
+    "resolveJsonModule": true,                
+    "lib": ["es2020"],                        
+    "typeRoots": [
+      "./node_modules/@types",               
+      "./node_modules/@solana"              
+    ]
+  },
+  "include": [
+    "client/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
