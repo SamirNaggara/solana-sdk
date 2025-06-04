@@ -1,7 +1,7 @@
 import { createMint, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { Connection, Keypair, ParsedInstruction, PartiallyDecodedInstruction, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import { createHash, sign } from 'crypto';
-import { createMemoInstruction } from '@solana/spl-memo';
+import { createMemoInstruction, MEMO_PROGRAM_ID} from '@solana/spl-memo';
 import { getPayerKeypair } from './lib/solanaUtils';
 import { ChipMetadata } from './schema/metadata';
 import { request } from 'https';
@@ -25,7 +25,7 @@ export interface SafeoutSDKOptions {
 	deleteProduct?: string;
 	getPayerKeypair?: string | null;
 }
-type networkValue = 'Mainnet' | 'Testnet' | 'Devnet';
+type NetworkValue = 'Mainnet' | 'Testnet' | 'Devnet';
 
 export class SafeoutSDK {
 	private mintAuthority: PublicKey;
@@ -49,7 +49,7 @@ export class SafeoutSDK {
 	 * @param options - Options object for all API route (optionnal)
 	 */
 	constructor(
-		network: networkValue,
+		network: NetworkValue,
 		hashAlgo: string,
 		mintAuthority: PublicKey,
 		owner: PublicKey,
@@ -157,6 +157,7 @@ export class SafeoutSDK {
 			throw new Error("Update object for signature failed");
 		}
 	}
+
 	/**
 	* Creates a new token mint and associated token account, then stores a hash of the provided metadata using a memo instruction.
 	* 
@@ -186,7 +187,7 @@ export class SafeoutSDK {
 		const associatedTokenAccount = await getAssociatedTokenAddress(
 			mint,
 			this.owner,
-			false, // Voir PDA
+			false,
 			TOKEN_PROGRAM_ID,
 			ASSOCIATED_TOKEN_PROGRAM_ID
 		);
@@ -255,8 +256,7 @@ export class SafeoutSDK {
 			throw new Error("Transaction not found.")
 		}
 
-		const memoProgramId = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
-		const memopublicKey = new PublicKey(memoProgramId);
+		const memopublicKey = MEMO_PROGRAM_ID;
 
 		for (const inner of tx.transaction.message.instructions) {
 			if (inner.programId.equals(memopublicKey)) {
@@ -303,7 +303,7 @@ export class SafeoutSDK {
 		const response = await fetch(this.getProducts + ProductId);
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
-		let data = await response.json();
+		let data : any = await response.json();
 		signature = data.product.signature;
 		return (signature);
 	}
@@ -324,7 +324,7 @@ export class SafeoutSDK {
 		const response = await fetch(this.getProducts + ProductId);
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
-		let data = await response.json()
+		let data :any = await response.json()
 		Data = {
 		id: ProductId,
 		name: data.product.name,

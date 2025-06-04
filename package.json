@@ -7,19 +7,13 @@
     "start": "ts-node mintToken.ts"
   },
   "dependencies": {
-    "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
     "@solana/spl-memo": "^0.2.5",
     "@solana/spl-token": "^0.3.0",
     "@solana/web3.js": "^1.98.2",
-    "@types/pg": "^8.15.1",
-    "crypto-js": "^4.2.0",
-    "pg": "^8.16.0"
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "@types/crypto-js": "^4.2.2",
-    "@types/dotenv": "^6.1.1",
     "@types/node-fetch": "^2.6.12",
-    "dotenv": "^16.5.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.8.3"
   }
