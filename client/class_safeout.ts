@@ -1,9 +1,8 @@
 import { createMint, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { Connection, Keypair, ParsedInstruction, PartiallyDecodedInstruction, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { createHash } from 'crypto';
+import { createHash, sign } from 'crypto';
 import { createMemoInstruction } from '@solana/spl-memo';
 import { getPayerKeypair } from './lib/solanaUtils';
-import { getBalances } from './get_balance';
 import { ChipMetadata } from './schema/metadata';
 import { request } from 'https';
 import fetch from 'node-fetch';
@@ -47,7 +46,7 @@ export class SafeoutSDK {
 	 * @param hashAlgo - The Algorim for the hash function (sha256 ...)
 	 * @param mintAuthority - The Publickey for your Mint
 	 * @param owner - The owner PublicKey
-	 * @param options - Options object for all API route
+	 * @param options - Options object for all API route (optionnal)
 	 */
 	constructor(
 		network: networkValue,
@@ -136,6 +135,29 @@ export class SafeoutSDK {
 	}
 
 	/**
+	* Set the signature of the transaction in the product data in data base
+	* 
+	* Apply a PATCH throw the API
+	* 
+	* @param privateMetadata - The object you want to update.
+	* @param signature - The Signature of the transaction
+	*/
+	public async Setsignature(privateMetadata: ChipMetadata, signature: string){
+		const updates = "signature:" + signature;
+
+		const response = await fetch(this.updateProduct + privateMetadata.id, {
+			method: 'PATCH',
+			headers: {
+			'Content-Type': 'application/json',
+			},
+			body: JSON.stringify(updates),
+		});
+		if (response.status !== 200)
+		{
+			throw new Error("Update object for signature failed");
+		}
+	}
+	/**
 	* Creates a new token mint and associated token account, then stores a hash of the provided metadata using a memo instruction.
 	* 
 	* The function:
@@ -145,20 +167,22 @@ export class SafeoutSDK {
 	* 
 	* This is useful for securely attaching off-chain metadata to an on-chain token without revealing the data itself.
 	* 
-	* @param privateMetadata - The metadata to hash and embed in the transaction memo.
+	* @param Product - The Product ID you want to hash and embed in the transaction memo.
 	* @returns A string containing the transaction signature.
 	* @throws If the transaction fails, it throws an error with details.
 	*/
-	public async createToken(privateMetadata: ChipMetadata): Promise<string> {
+	public async createToken(ProductId: string): Promise<string> {
 
 		let payer: Keypair;
+
+		const privateMetadata = await this.getMetadataFromId(ProductId)
+
 		if (this.getEndpoints().getPayerKeypair == null)
 			payer = await getPayerKeypair();
 		else
 			payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(request(this.getEndpoints().getPayerKeypair).toString())));
-		const mint = await createMint(this.connection, payer, this.mintAuthority, null, 0);
-		console.log('Token created with mint:', mint.toBase58());
 
+		const mint = await createMint(this.connection, payer, this.mintAuthority, null, 0);
 		const associatedTokenAccount = await getAssociatedTokenAddress(
 			mint,
 			this.owner,
@@ -166,10 +190,8 @@ export class SafeoutSDK {
 			TOKEN_PROGRAM_ID,
 			ASSOCIATED_TOKEN_PROGRAM_ID
 		);
-		console.log('Associated token account:', associatedTokenAccount.toBase58());
-		const hashData = this.hashObject(privateMetadata);
-		console.log('Hash of private metadata:', hashData);
 
+		const hashData = this.hashObject(privateMetadata);
 		const ataInstruction = createAssociatedTokenAccountInstruction(
 			payer.publicKey,
 			associatedTokenAccount,
@@ -193,10 +215,10 @@ export class SafeoutSDK {
 				commitment: 'confirmed',
 			});
 			console.log('Transaction successful! Signature:', signature);
-
+			this.Setsignature(privateMetadata, signature);
 			return signature;
 		} catch (error) {
-			throw ('Transaction failed:' + error);
+			throw new Error('Transaction failed:' + error);
 		}
 	}
 
@@ -217,17 +239,20 @@ export class SafeoutSDK {
 	* 
 	* Searches through the instructions in a parsed transaction and returns the content of the memo.
 	* 
-	* @param signature - The signature of the transaction.
+	* @param IdProduct - The product Id you want the Memo.
 	* @returns The memo string stored in the transaction.
 	* @throws If the transaction is not found or does not contain a memo instruction.
 	*/
-	public async getMemoFromSignature(signature: string): Promise<string> {
+	public async getMemoFromSignature(IdProduct: string): Promise<string> {
+		let signature = await this.getSignatureFromId(IdProduct);
+		if (!signature)
+			throw new Error("No signature for" + IdProduct);
 		const tx = await this.connection.getParsedTransaction(signature, {
 			commitment: "confirmed",
 		});
 
 		if (!tx) {
-			throw ("Transaction not found.")
+			throw new Error("Transaction not found.")
 		}
 
 		const memoProgramId = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
@@ -240,9 +265,59 @@ export class SafeoutSDK {
 				}
 			}
 		}
-		throw ("Memo Not found");
+		throw new Error("Memo Not found");
 	}
 
+	/**
+	* Verifies if a product's metadata matches the hash stored on the blockchain.
+	* 
+	* Retrieves the metadata of a product using its ID, generates a hash from this metadata,
+	* and compares it with the memo field stored on-chain (retrieved using the product's signature).
+	* 
+	* @param ProductId - The ID of the product to verify on the blockchain.
+	* @returns A promise that resolves to a string indicating whether the data is valid or not.
+	* @throws If fetching metadata or the memo fails internally.
+	*/
+	public async CheckOnBlockChain(ProductId: string): Promise<string> {
+		const metadata: ChipMetadata = await (this.getMetadataFromId(ProductId))
+		const hash = this.hashObject(metadata).toString();
+		let memo = await this.getMemoFromSignature(ProductId);
+		if (memo != hash)
+			return ("Not Valided by BlockChain");
+		return ("Valided by blockchain");
+	}
+
+	/**
+	* Retrieves the transaction signature associated with a given product ID.
+	* 
+	* Sends a request to the product endpoint and extracts the transaction signature
+	* from the response data.
+	* 
+	* @param ProductId - The ID of the product to retrieve the signature for.
+	* @returns A promise that resolves to the transaction signature string.
+	* @throws If the HTTP request fails or the response status is not 200.
+	*/
+	public async getSignatureFromId(ProductId: string): Promise<string>{
+		let signature;
+
+		const response = await fetch(this.getProducts + ProductId);
+		if (response.status != 200)
+			throw new Error("Error get Metadata");
+		let data = await response.json();
+		signature = data.product.signature;
+		return (signature);
+	}
+
+	/**
+	* Retrieves the chip metadata associated with a given product ID.
+	* 
+	* Fetches the product data and constructs a ChipMetadata object based on the response.
+	* Useful for displaying product information such as name, description, and default ownership.
+	* 
+	* @param ProductId - The ID of the product to retrieve metadata for.
+	* @returns A promise that resolves to a ChipMetadata object containing the product's details.
+	* @throws If the HTTP request fails or the response status is not 200.
+	*/
 	public async getMetadataFromId(ProductId: string): Promise<ChipMetadata> {
 		let Data:ChipMetadata;
 
@@ -251,6 +326,7 @@ export class SafeoutSDK {
 			throw new Error("Error get Metadata");
 		let data = await response.json()
 		Data = {
+		id: ProductId,
 		name: data.product.name,
 		description: data.product.attributes.description.value,
 		isStolen: false,
@@ -266,15 +342,9 @@ async function check() {
 		'sha256',
 		new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
 		new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
-	const metadata: ChipMetadata = await (sdk.getMetadataFromId('abb9a98e-55f8-466e-81ee-248d41114658'))
-	const hash = sdk.hashObject(metadata).toString();
 	try {
-		let signature = await sdk.createToken(metadata)
-		let memo = await sdk.getMemoFromSignature(signature);
-		if (memo == hash)
-			console.log("Valided by blockchain");
-		else
-			console.log("hash didnt match");
+		await sdk.createToken('abb9a98e-55f8-466e-81ee-248d41114658')
+		console.log(sdk.CheckOnBlockChain('abb9a98e-55f8-466e-81ee-248d41114658'))
 	}
 	catch (error) {
 		console.error(error);
