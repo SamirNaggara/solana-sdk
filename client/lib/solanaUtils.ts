@@ -8,8 +8,6 @@ export const getPayerKeypair = async (): Promise<Keypair> => {
   return keypair;
 };
 
-
-
 export function deserializeMetadata(metadata: Buffer): ChipMetadata {
   return JSON.parse(metadata.toString()) as ChipMetadata;
 }

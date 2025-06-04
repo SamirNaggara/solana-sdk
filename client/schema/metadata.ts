@@ -7,3 +7,4 @@ export interface ChipMetadata {
     extraInfo: string;
     owner: PublicKey;
 }
+// Faire un big obj DPP friendly
