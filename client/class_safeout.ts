@@ -61,7 +61,7 @@ export class SafeoutSDK {
 		let url: string = '';
 		this.getProducts = options.getProducts || 'http://localhost:4000/RestApi/get/';
 		this.newProduct = options.newProduct || 'http://localhost:4000/RestApi/new';
-		this.updateProduct = options.updateProduct || 'http://localhost:4000/RestApi/update';
+		this.updateProduct = options.updateProduct || 'http://localhost:4000/RestApi/update/';
 		this.deleteProduct = options.deleteProduct || 'http://localhost:4000/RestApi/delete/';
 		this.getPayerKeypair = options.getPayerKeypair || null;
 		if (network == 'Mainnet')
@@ -143,7 +143,7 @@ export class SafeoutSDK {
 	* @param signature - The Signature of the transaction
 	*/
 	public async Setsignature(privateMetadata: ChipMetadata, signature: string){
-		const updates = "signature:" + signature;
+		const updates = {"signature" : signature};
 
 		const response = await fetch(this.updateProduct + privateMetadata.id, {
 			method: 'PATCH',
@@ -154,6 +154,8 @@ export class SafeoutSDK {
 		});
 		if (response.status !== 200)
 		{
+			const data = await response.json() as { message: string };;
+			console.error(response.status + " " + response.statusText + " " + data.message);
 			throw new Error("Update object for signature failed");
 		}
 	}
@@ -215,7 +217,6 @@ export class SafeoutSDK {
 				skipPreflight: false,
 				commitment: 'confirmed',
 			});
-			console.log('Transaction successful! Signature:', signature);
 			this.Setsignature(privateMetadata, signature);
 			return signature;
 		} catch (error) {
@@ -297,15 +298,22 @@ export class SafeoutSDK {
 	* @returns A promise that resolves to the transaction signature string.
 	* @throws If the HTTP request fails or the response status is not 200.
 	*/
-	public async getSignatureFromId(ProductId: string): Promise<string>{
+	public async getSignatureFromId(ProductId: string): Promise<string | null>{
 		let signature;
 
 		const response = await fetch(this.getProducts + ProductId);
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
 		let data : any = await response.json();
-		signature = data.product.signature;
-		return (signature);
+		try
+		{
+			signature = data.product.additionalInfo.signature.value;
+			return (signature);
+		}
+		catch (error)
+		{
+			return (null)
+		}
 	}
 
 	/**
@@ -344,7 +352,6 @@ async function check() {
 		new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
 	try {
 		await sdk.createToken('abb9a98e-55f8-466e-81ee-248d41114658')
-		console.log(sdk.CheckOnBlockChain('abb9a98e-55f8-466e-81ee-248d41114658'))
 	}
 	catch (error) {
 		console.error(error);
@@ -355,7 +362,31 @@ async function test() {
 		'sha256',
 		new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
 		new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
-	console.log(await sdk.getMetadataFromId('abb9a98e-55f8-466e-81ee-248d41114658'));
+	try{
+		console.log(await sdk.CheckOnBlockChain('abb9a98e-55f8-466e-81ee-248d41114658'));
+	}
+	catch (error) {
+		console.error(error);
+	}
 }
-// check()
-test()
+
+import * as readline from 'readline';
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
+
+rl.question('check or create token ?\n', (answer) => {
+    switch(answer.toLowerCase()) {
+    case 'check':
+        test()
+        break;
+    case 'create':
+        check()
+        break;
+    default:
+        console.log('Invalid answer!');
+    }
+    rl.close();
+});
