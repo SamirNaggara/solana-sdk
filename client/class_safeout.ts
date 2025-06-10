@@ -38,7 +38,7 @@ export class SafeoutSDK {
 	private deleteProduct: string;
 	private getPayerKeypair: string | null;
 	private connection: Connection;
-
+	private JWToken: string;
 	/**
 	 * Create class for Solana-Mint-SDK
 	 *
@@ -51,12 +51,14 @@ export class SafeoutSDK {
 	constructor(
 		network: NetworkValue,
 		hashAlgo: string,
+		JWToken: string,
 		mintAuthority: PublicKey,
 		owner: PublicKey,
 		options: SafeoutSDKOptions = {}
 	) {
 		this.mintAuthority = mintAuthority;
 		this.hashAlgo = hashAlgo;
+		this.JWToken = JWToken;
 		this.owner = owner;
 		let url: string = '';
 		this.getProducts = options.getProducts || 'http://localhost:4000/RestApi/get/';
@@ -149,6 +151,7 @@ export class SafeoutSDK {
 			method: 'PATCH',
 			headers: {
 			'Content-Type': 'application/json',
+			'Authorization': 'Bearer ' + this.JWToken
 			},
 			body: JSON.stringify(updates),
 		});
@@ -301,7 +304,11 @@ export class SafeoutSDK {
 	public async getSignatureFromId(ProductId: string): Promise<string | null>{
 		let signature;
 
-		const response = await fetch(this.getProducts + ProductId);
+		const response = await fetch(this.getProducts + ProductId, {
+			headers: {
+			'Authorization': 'Bearer ' + this.JWToken,
+			}
+		});
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
 		let data : any = await response.json();
@@ -329,7 +336,11 @@ export class SafeoutSDK {
 	public async getMetadataFromId(ProductId: string): Promise<ChipMetadata> {
 		let Data:ChipMetadata;
 
-		const response = await fetch(this.getProducts + ProductId);
+		const response = await fetch(this.getProducts + ProductId, {
+			headers: {
+			'Authorization': 'Bearer ' + this.JWToken,
+			}
+		});
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
 		let data :any = await response.json()
@@ -348,6 +359,7 @@ export class SafeoutSDK {
 async function check() {
 	const sdk = new SafeoutSDK('Devnet',
 		'sha256',
+		"eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJjb21wYW55Ijp7ImlkIjoic2FmZW91dCIsImltYWdlVXJsIjpudWxsLCJjcmVhdGVkQXQiOiIyMDI1LTA2LTAyVDExOjE0OjI5LjE2NFoiLCJ1cGRhdGVkQXQiOiIyMDI1LTA2LTAyVDExOjE0OjI5LjE2NFoiLCJuYW1lIjoiU2FmZW91dCIsImNyZWRpdHMiOjAsInN1YmRvbWFpbiI6bnVsbCwidXNlcnMiOlt7ImlkIjoiYmE5YjgwYTQ3NjM5IiwiZW1haWwiOiJheGVsQHNhZmVvdXQuaW8iLCJmaXJzdE5hbWUiOiJBeGVsIiwibGFzdE5hbWUiOiJHaWd1YWlyZSIsInBob25lTnVtYmVyIjpudWxsLCJwaWN0dXJlVXJsIjpudWxsLCJjb21wYW55SWQiOiJzYWZlb3V0Iiwicm9sZUlkIjpudWxsLCJyb2xlIjpudWxsLCJpc1NhZmVvdXRBZG1pbiI6dHJ1ZSwiY3JlYXRlZEF0IjoiMjAyNS0wNi0wMlQxMTo1ODoxMC45NjFaIiwidXBkYXRlZEF0IjoiMjAyNS0wNi0wMlQxMjowMDoyNC40MTFaIn1dLCJyZWdpc3RyYXRpb25OdW1iZXIiOm51bGwsInRheElkIjpudWxsLCJjb21wYW55VHlwZSI6bnVsbCwiaW5kdXN0cnkiOm51bGwsInNvY2lhbE5ldHdvcmtzIjpudWxsLCJ0ZW1wbGF0ZSI6bnVsbCwid2hpdGVsYWJlbENvbmZpZyI6bnVsbCwid2hpbGFiZWxDb25maWciOm51bGwsInNlY3VyZU1vZGUiOmZhbHNlLCJzdGF0ZVNlY3VyaXR5IjpmYWxzZX0sImlhdCI6MTc0OTU0NzQyMCwiZXhwIjoxNzQ5NjMzODIwfQ.XGDB4IMUwgsihxhFjNKPYLCiAz8VBkJGwuIINFYGV9NwPSGx7QW_flcGZKa6GzK5Agq9v6P0FnP8QYdrevc8mANDuChTjYpaOPKm85G0vEd7gxrvAARrGi08kcUpXHqteyGl2BinnmR6ZwtKcVdIP946hvYMpvd4vmuSdezcOkADqMnl2bc4n1NSDsKWOXRQGINDT5E7Sc5XEBlDPLt3TtXLzzstCEWE4ncmfhcND_zt-JGXMaF5LfmY49gtOvkEzK6cA_ER2iVjR4iqUQ4BYnjOFdsHyUnx3vNVoihvmQ2phFEzdpTpYO1NZnYxbAzCKBc0STz2-EziGJgWPsALv2LDMl3j9idrpFxSkgRDMK4oieyLNu89zWnX207oGDyTI0JknIRr8EN-yol725Ya5L_Wox3OrJwxTcKrWnDVY9q_BcNq92xipLg-yottdt51SQQ_yFJRAPfT6GvfVBJWN_p3slQrt08fPraNtbku3Q9aSQu5ukoxgT_X3u6GfHDsB1sG9n19SytBukRqZ390WCR7TXGLkUjdxXsw-eX6DwUZwUYmBCzpTxZX0BdYO9fz_z5TwH1bkw3TfU6x82Ix7u_xjDGSq4_ITFKOiQz3ufWJ4UaIp9nCPDcW5H4gS1bH8zojDkYfejl32X1q6O0fegy7MylUWrZ5VXr8USi8_l8",
 		new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
 		new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
 	try {
@@ -357,36 +369,3 @@ async function check() {
 		console.error(error);
 	}
 }
-async function test() {
-	const sdk = new SafeoutSDK('Devnet',
-		'sha256',
-		new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
-		new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
-	try{
-		console.log(await sdk.CheckOnBlockChain('abb9a98e-55f8-466e-81ee-248d41114658'));
-	}
-	catch (error) {
-		console.error(error);
-	}
-}
-
-import * as readline from 'readline';
-
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-rl.question('check or create token ?\n', (answer) => {
-    switch(answer.toLowerCase()) {
-    case 'check':
-        test()
-        break;
-    case 'create':
-        check()
-        break;
-    default:
-        console.log('Invalid answer!');
-    }
-    rl.close();
-});
