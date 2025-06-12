@@ -1,7 +1,8 @@
-import { createMint, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { Connection, Keypair, ParsedInstruction, PartiallyDecodedInstruction, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { createMint, approve, revoke, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { Connection, Keypair, ParsedInstruction, PartiallyDecodedInstruction, PublicKey, Transaction, sendAndConfirmTransaction, Signer } from '@solana/web3.js';
+
 import { createHash, sign } from 'crypto';
-import { createMemoInstruction, MEMO_PROGRAM_ID} from '@solana/spl-memo';
+import { createMemoInstruction, MEMO_PROGRAM_ID } from '@solana/spl-memo';
 import { getPayerKeypair } from './lib/solanaUtils';
 import { ChipMetadata } from './schema/metadata';
 import { request } from 'https';
@@ -144,22 +145,68 @@ export class SafeoutSDK {
 	* @param privateMetadata - The object you want to update.
 	* @param signature - The Signature of the transaction
 	*/
-	public async Setsignature(privateMetadata: ChipMetadata, signature: string){
-		const updates = {"signature" : signature};
+	public async Setsignature(privateMetadata: ChipMetadata, signature: string) {
+		const updates = { "signature": signature };
 
 		const response = await fetch(this.updateProduct + privateMetadata.id, {
 			method: 'PATCH',
 			headers: {
-			'Content-Type': 'application/json',
-			'Authorization': 'Bearer ' + this.JWToken
+				'Content-Type': 'application/json',
+				'Authorization': 'Bearer ' + this.JWToken
 			},
 			body: JSON.stringify(updates),
 		});
-		if (response.status !== 200)
-		{
+		if (response.status !== 200) {
 			const data = await response.json() as { message: string };;
 			console.error(response.status + " " + response.statusText + " " + data.message);
 			throw new Error("Update object for signature failed");
+		}
+	}
+
+	/**
+	* Delegates authority to a specified delegate public key.
+	*
+	* This function uses the `approve` method from the SPL Token library to delegate authority
+	* over a token account to another public key. The owner of the token account must sign the transaction.
+	*
+	* @param delegate - The public key of the delegate to whom authority is being granted.
+	* @returns A promise that resolves to the transaction signature.
+	* @throws If the transaction fails, it throws an error with details.
+	*/
+	public async delegateTokenAuthority(delegate: PublicKey) {
+		try {
+			const tx = await approve(
+				this.connection,
+				this.owner,
+				delegate,
+				this.owner.publicKey,
+				1
+			);
+		} catch (error) {
+			throw new Error('Transaction failed: ' + error);
+		}
+	}
+
+	/**
+	* Revokes authority from a specified delegate public key.
+	*
+	* This function uses the `revoke` method from the SPL Token library to remove authority
+	* from a delegate public key. The owner of the token account must sign the transaction.
+	*
+	* @param delegate - The public key of the delegate whose authority is being revoked.
+	* @returns A promise that resolves to the transaction signature.
+	* @throws If the transaction fails, it throws an error with details.
+	*/
+	public async revokeTokenAuthority(delegate: PublicKey) {
+		try {
+			const tx = await revoke(
+				this.connection,
+				this.owner,
+				delegate,
+				this.owner.publicKey
+			);
+		} catch (error) {
+			throw new Error('Transaction failed: ' + error);
 		}
 	}
 
@@ -301,24 +348,22 @@ export class SafeoutSDK {
 	* @returns A promise that resolves to the transaction signature string.
 	* @throws If the HTTP request fails or the response status is not 200.
 	*/
-	public async getSignatureFromId(ProductId: string): Promise<string | null>{
+	public async getSignatureFromId(ProductId: string): Promise<string | null> {
 		let signature;
 
 		const response = await fetch(this.getProducts + ProductId, {
 			headers: {
-			'Authorization': 'Bearer ' + this.JWToken,
+				'Authorization': 'Bearer ' + this.JWToken,
 			}
 		});
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
-		let data : any = await response.json();
-		try
-		{
+		let data: any = await response.json();
+		try {
 			signature = data.product.additionalInfo.signature.value;
 			return (signature);
 		}
-		catch (error)
-		{
+		catch (error) {
 			return (null)
 		}
 	}
@@ -334,38 +379,24 @@ export class SafeoutSDK {
 	* @throws If the HTTP request fails or the response status is not 200.
 	*/
 	public async getMetadataFromId(ProductId: string): Promise<ChipMetadata> {
-		let Data:ChipMetadata;
+		let Data: ChipMetadata;
 
 		const response = await fetch(this.getProducts + ProductId, {
 			headers: {
-			'Authorization': 'Bearer ' + this.JWToken,
+				'Authorization': 'Bearer ' + this.JWToken,
 			}
 		});
 		if (response.status != 200)
 			throw new Error("Error get Metadata");
-		let data :any = await response.json()
+		let data: any = await response.json()
 		Data = {
-		id: ProductId,
-		name: data.product.name,
-		description: data.product.attributes.description.value,
-		isStolen: false,
-		extraInfo: "",
-		owner: new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
+			id: ProductId,
+			name: data.product.name,
+			description: data.product.attributes.description.value,
+			isStolen: false,
+			extraInfo: "",
+			owner: new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
 		};
 		return (Data)
 	}
 };
-
-async function check() {
-	const sdk = new SafeoutSDK('Devnet',
-		'sha256',
-		"eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJjb21wYW55Ijp7ImlkIjoic2FmZW91dCIsImltYWdlVXJsIjpudWxsLCJjcmVhdGVkQXQiOiIyMDI1LTA2LTAyVDExOjE0OjI5LjE2NFoiLCJ1cGRhdGVkQXQiOiIyMDI1LTA2LTAyVDExOjE0OjI5LjE2NFoiLCJuYW1lIjoiU2FmZW91dCIsImNyZWRpdHMiOjAsInN1YmRvbWFpbiI6bnVsbCwidXNlcnMiOlt7ImlkIjoiYmE5YjgwYTQ3NjM5IiwiZW1haWwiOiJheGVsQHNhZmVvdXQuaW8iLCJmaXJzdE5hbWUiOiJBeGVsIiwibGFzdE5hbWUiOiJHaWd1YWlyZSIsInBob25lTnVtYmVyIjpudWxsLCJwaWN0dXJlVXJsIjpudWxsLCJjb21wYW55SWQiOiJzYWZlb3V0Iiwicm9sZUlkIjpudWxsLCJyb2xlIjpudWxsLCJpc1NhZmVvdXRBZG1pbiI6dHJ1ZSwiY3JlYXRlZEF0IjoiMjAyNS0wNi0wMlQxMTo1ODoxMC45NjFaIiwidXBkYXRlZEF0IjoiMjAyNS0wNi0wMlQxMjowMDoyNC40MTFaIn1dLCJyZWdpc3RyYXRpb25OdW1iZXIiOm51bGwsInRheElkIjpudWxsLCJjb21wYW55VHlwZSI6bnVsbCwiaW5kdXN0cnkiOm51bGwsInNvY2lhbE5ldHdvcmtzIjpudWxsLCJ0ZW1wbGF0ZSI6bnVsbCwid2hpdGVsYWJlbENvbmZpZyI6bnVsbCwid2hpbGFiZWxDb25maWciOm51bGwsInNlY3VyZU1vZGUiOmZhbHNlLCJzdGF0ZVNlY3VyaXR5IjpmYWxzZX0sImlhdCI6MTc0OTU0NzQyMCwiZXhwIjoxNzQ5NjMzODIwfQ.XGDB4IMUwgsihxhFjNKPYLCiAz8VBkJGwuIINFYGV9NwPSGx7QW_flcGZKa6GzK5Agq9v6P0FnP8QYdrevc8mANDuChTjYpaOPKm85G0vEd7gxrvAARrGi08kcUpXHqteyGl2BinnmR6ZwtKcVdIP946hvYMpvd4vmuSdezcOkADqMnl2bc4n1NSDsKWOXRQGINDT5E7Sc5XEBlDPLt3TtXLzzstCEWE4ncmfhcND_zt-JGXMaF5LfmY49gtOvkEzK6cA_ER2iVjR4iqUQ4BYnjOFdsHyUnx3vNVoihvmQ2phFEzdpTpYO1NZnYxbAzCKBc0STz2-EziGJgWPsALv2LDMl3j9idrpFxSkgRDMK4oieyLNu89zWnX207oGDyTI0JknIRr8EN-yol725Ya5L_Wox3OrJwxTcKrWnDVY9q_BcNq92xipLg-yottdt51SQQ_yFJRAPfT6GvfVBJWN_p3slQrt08fPraNtbku3Q9aSQu5ukoxgT_X3u6GfHDsB1sG9n19SytBukRqZ390WCR7TXGLkUjdxXsw-eX6DwUZwUYmBCzpTxZX0BdYO9fz_z5TwH1bkw3TfU6x82Ix7u_xjDGSq4_ITFKOiQz3ufWJ4UaIp9nCPDcW5H4gS1bH8zojDkYfejl32X1q6O0fegy7MylUWrZ5VXr8USi8_l8",
-		new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
-		new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
-	try {
-		await sdk.createToken('abb9a98e-55f8-466e-81ee-248d41114658')
-	}
-	catch (error) {
-		console.error(error);
-	}
-}
