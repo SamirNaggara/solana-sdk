@@ -1,12 +1,13 @@
-import { createMint, approve, revoke, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { Connection, Keypair, ParsedInstruction, PartiallyDecodedInstruction, PublicKey, Transaction, sendAndConfirmTransaction, Signer } from '@solana/web3.js';
+import { createMint, getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { Connection, Keypair, ParsedInstruction, PartiallyDecodedInstruction, PublicKey, Transaction, sendAndConfirmTransaction, Signer, TransactionInstruction } from '@solana/web3.js';
 
-import { createHash, sign } from 'crypto';
+import { createHash } from 'crypto';
 import { createMemoInstruction, MEMO_PROGRAM_ID } from '@solana/spl-memo';
 import { getPayerKeypair } from './lib/solanaUtils';
 import { ChipMetadata } from './schema/metadata';
 import { request } from 'https';
 import fetch from 'node-fetch';
+import z from 'zod';
 
 
 /**
@@ -26,8 +27,82 @@ export interface SafeoutSDKOptions {
 	deleteProduct?: string;
 	getPayerKeypair?: string | null;
 }
+
+/**
+* Type for network values used in the SDK.
+* This type defines the possible networks that can be used with the SDK.
+* It includes 'Mainnet', 'Testnet', and 'Devnet'.
+*/
 type NetworkValue = 'Mainnet' | 'Testnet' | 'Devnet';
 
+/**
+* Schema for validating ISO date strings.
+*
+* This schema checks if a string is a valid ISO date format.
+* It uses the `zod` library to ensure that the date can be parsed correctly.
+* If the date is invalid, it throws an error with a custom message.
+*/
+const isoDateString = z.string().refine(val => !isNaN(Date.parse(val)), {
+	message: "Must be a valid ISO date string",
+});
+
+/**
+* Schema for validating a signature object.
+*
+* This schema requires a `hash` string, an `updatedAt` ISO date string,
+* and an optional `lastUpdate` array of strings.
+* The `hash` must be a non-empty string, and `updatedAt` must be a valid ISO date.
+* The `lastUpdate` is optional and can be an array of non-empty strings.
+*/
+const signatureString = z.string().min(1, "Signature must be a non-empty string");
+
+/**
+* Schema for validating a signature object.
+*
+* This schema requires a `hash` string, an `updatedAt` ISO date string,
+* and an optional `lastUpdate` array of strings.
+* The `hash` must be a non-empty string, and `updatedAt` must be a valid ISO date.
+* The `lastUpdate` is optional and can be an array of non-empty strings.
+*/
+const SignatureSchema = z.object({
+	hash: z.string().min(1, "Hash is required"),
+	updatedAt: isoDateString,
+	lastUpdate: z.array(signatureString).optional(), // facultatif au premier enregistrement
+});
+
+/**
+* Class representing the Safeout SDK.
+*
+* This class provides methods to interact with the Safeout API and the Solana blockchain.
+* It allows you to create, update, and check products on the blockchain,
+* as well as manage token mints and associated token accounts.
+*
+* @class SafeoutSDK
+* @param network - The network to use (Mainnet, Testnet, or Devnet).
+* @param hashAlgo - The algorithm to use for hashing (e.g., 'sha256').
+* @param JWToken - The JSON Web Token for authentication with the Safeout API.
+* @param mintAuthority - The public key of the mint authority.
+* @param owner - The public key of the owner of the tokens.
+* @param options - Optional parameters for API endpoints.
+* @property {PublicKey} mintAuthority - The public key of the mint authority.
+* @property {PublicKey} owner - The public key of the owner of the tokens.
+* @property {string} hashAlgo - The algorithm used for hashing.
+* @property {string} getProducts - The API endpoint for getting products.
+* @property {string} newProduct - The API endpoint for creating a new product.
+* @property {string} updateProduct - The API endpoint for updating a product.
+* @property {string} deleteProduct - The API endpoint for deleting a product.
+* @property {string | null} getPayerKeypair - The API endpoint for getting the payer keypair, or null if not provided.
+* @property {Connection} connection - The Solana connection object.
+* @property {string} JWToken - The JSON Web Token for authentication with the Safeout API.
+* @example
+* const sdk = new SafeoutSDK('Devnet', 'sha256', 'your-jwt-token', new PublicKey('your-mint-authority'), new PublicKey('your-owner-public-key'), {
+*   getProducts: 'http://website.com/API/get/',
+*   newProduct: 'http://website.com/API/new',
+*   updateProduct: 'http://website.com/API/update/',
+*   deleteProduct: 'http://website.com/API/delete/',
+*   getPayerKeypair: 'http://website.com/API/getPayerKeypair',
+* });
+*/
 export class SafeoutSDK {
 	private mintAuthority: PublicKey;
 	private owner: PublicKey;
@@ -76,26 +151,22 @@ export class SafeoutSDK {
 		this.connection = new Connection(url, 'confirmed');
 	}
 
-	public getMintAuthority(): PublicKey {
-		return this.mintAuthority;
-	}
+	/**
+	* Retrieves the payer keypair from the specified API endpoint or local file.
+	*
+	* If `this.getPayerKeypair` is provided, it fetches the keypair from that URL.
+	* If not provided, it defaults to using the `getPayerKeypair` function to read from a local file.
+	*
+	* @returns A Promise that resolves to a Keypair object representing the payer's keypair.
+	* @throws If the request fails or the response cannot be parsed as a Keypair.
+	*/
+	private async getPayer(): Promise<Keypair> {
+		if (!this.getPayerKeypair) {
+			return await getPayerKeypair();
+		}
 
-	public gethashAlgo(): string {
-		return this.hashAlgo;
-	}
-
-	public getOwner(): PublicKey {
-		return this.owner;
-	}
-
-	public getEndpoints(): Record<string, string> {
-		return {
-			getProducts: this.getProducts,
-			newProduct: this.newProduct,
-			updateProduct: this.updateProduct,
-			deleteProduct: this.deleteProduct,
-			getPayerkeypair: this.getPayerKeypair!,
-		};
+		const response = await request(this.getPayerKeypair);
+		return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(response.toString())));
 	}
 
 	/**
@@ -125,14 +196,14 @@ export class SafeoutSDK {
 	* Generates a SHA hash from a ChipMetadata object.
 	* 
 	* The metadata is first converted into a stable JSON string (sorted keys, `PublicKey`s serialized),
-	* then hashed using the algorithm specified by `gethashAlgo()` (e.g., 'sha256').
+	* then hashed using the algorithm specified by `this.hashAlgo` (e.g., 'sha256').
 	* 
 	* @param obj - The metadata object to hash.
 	* @returns A hexadecimal string representing the hash of the metadata.
 	*/
 	public hashObject(obj: ChipMetadata): string {
 		const json = this.stableStringify(obj);
-		const hash = createHash(this.gethashAlgo());
+		const hash = createHash(this.hashAlgo);
 		hash.update(json);
 		return hash.digest('hex');
 	}
@@ -164,51 +235,67 @@ export class SafeoutSDK {
 	}
 
 	/**
-	* Delegates authority to a specified delegate public key.
+	* Creates a transaction instruction to create an associated token account for the owner.
 	*
-	* This function uses the `approve` method from the SPL Token library to delegate authority
-	* over a token account to another public key. The owner of the token account must sign the transaction.
+	* This method generates a new mint, creates an associated token account for the owner,
+	* and returns a transaction instruction that can be used to execute this operation.
 	*
-	* @param delegate - The public key of the delegate to whom authority is being granted.
-	* @returns A promise that resolves to the transaction signature.
-	* @throws If the transaction fails, it throws an error with details.
+	* @param payer - The Signer who will pay for the transaction and sign it.
+	* @returns A Promise that resolves to a TransactionInstruction for creating the associated token account.
+	* @throws If the mint creation fails, it throws an error with details.
 	*/
-	public async delegateTokenAuthority(delegate: PublicKey) {
-		try {
-			const tx = await approve(
-				this.connection,
-				this.owner,
-				delegate,
-				this.owner.publicKey,
-				1
-			);
-		} catch (error) {
-			throw new Error('Transaction failed: ' + error);
-		}
+	private async createIntruction(payer: Signer): Promise<TransactionInstruction> {
+		const mint = await createMint(this.connection, payer, this.mintAuthority, null, 0);
+		const associatedTokenAccount = await getAssociatedTokenAddress(
+			mint,
+			this.owner,
+			false,
+			TOKEN_PROGRAM_ID,
+			ASSOCIATED_TOKEN_PROGRAM_ID
+		);
+		const ataInstruction = createAssociatedTokenAccountInstruction(
+			payer.publicKey,
+			associatedTokenAccount,
+			this.owner,
+			mint,
+			TOKEN_PROGRAM_ID,
+			ASSOCIATED_TOKEN_PROGRAM_ID
+		);
+		return ataInstruction;
 	}
 
 	/**
-	* Revokes authority from a specified delegate public key.
+	* Sends a transaction to create an associated token account and attach a memo.
 	*
-	* This function uses the `revoke` method from the SPL Token library to remove authority
-	* from a delegate public key. The owner of the token account must sign the transaction.
+	* This method constructs a transaction that includes an instruction to create an associated token account
+	* and a memo instruction containing the provided memo string.
 	*
-	* @param delegate - The public key of the delegate whose authority is being revoked.
+	* @param payer - The Keypair of the payer who will sign and pay for the transaction.
+	* @param ataInstruction - The instruction to create the associated token account.
+	* @param memo - The memo string to be included in the transaction.
 	* @returns A promise that resolves to the transaction signature.
 	* @throws If the transaction fails, it throws an error with details.
 	*/
-	public async revokeTokenAuthority(delegate: PublicKey) {
-		try {
-			const tx = await revoke(
-				this.connection,
-				this.owner,
-				delegate,
-				this.owner.publicKey
-			);
-		} catch (error) {
-			throw new Error('Transaction failed: ' + error);
-		}
+	private async sendTransactionWithMemo(
+		payer: Keypair,
+		ataInstruction: TransactionInstruction,
+		memo: string
+	): Promise<string> {
+		const memoInstruction = createMemoInstruction(memo, [payer.publicKey]);
+		const transaction = new Transaction()
+			.add(ataInstruction)
+			.add(memoInstruction);
+
+		const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
+		transaction.recentBlockhash = latestBlockhash.blockhash;
+		transaction.feePayer = payer.publicKey;
+
+		return await sendAndConfirmTransaction(this.connection, transaction, [payer], {
+			skipPreflight: false,
+			commitment: 'confirmed',
+		});
 	}
+
 
 	/**
 	* Creates a new token mint and associated token account, then stores a hash of the provided metadata using a memo instruction.
@@ -226,48 +313,75 @@ export class SafeoutSDK {
 	*/
 	public async createToken(ProductId: string): Promise<string> {
 
-		let payer: Keypair;
+		let payer: Keypair = await this.getPayer();
 
 		const privateMetadata = await this.getMetadataFromId(ProductId)
-
-		if (this.getEndpoints().getPayerKeypair == null)
-			payer = await getPayerKeypair();
-		else
-			payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(request(this.getEndpoints().getPayerKeypair).toString())));
-
-		const mint = await createMint(this.connection, payer, this.mintAuthority, null, 0);
-		const associatedTokenAccount = await getAssociatedTokenAddress(
-			mint,
-			this.owner,
-			false,
-			TOKEN_PROGRAM_ID,
-			ASSOCIATED_TOKEN_PROGRAM_ID
-		);
-
+		if (await this.getSignatureFromId(ProductId)) {
+			throw new Error("Token already created for this Product ID: " + ProductId);
+		}
 		const hashData = this.hashObject(privateMetadata);
-		const ataInstruction = createAssociatedTokenAccountInstruction(
-			payer.publicKey,
-			associatedTokenAccount,
-			this.owner,
-			mint,
-			TOKEN_PROGRAM_ID,
-			ASSOCIATED_TOKEN_PROGRAM_ID
-		);
 
-		const memoInstruction = createMemoInstruction(hashData, [payer.publicKey]); // Public / Owner / Brand TODO
+		const ataInstruction = await this.createIntruction(payer)
+		const memodata = JSON.stringify({
+			hash: hashData,
+			updatedAt: new Date().toISOString(),
+			lastUpdate: [],
+		});
 
-		const transaction = new Transaction()
-			.add(ataInstruction)
-			.add(memoInstruction);
-		const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
-		transaction.recentBlockhash = latestBlockhash.blockhash;
-		transaction.feePayer = payer.publicKey;
 		try {
-			const signature = await sendAndConfirmTransaction(this.connection, transaction, [payer], {
-				skipPreflight: false,
-				commitment: 'confirmed',
-			});
+			const signature = await this.sendTransactionWithMemo(payer, ataInstruction, memodata);
 			this.Setsignature(privateMetadata, signature);
+			return signature;
+		} catch (error) {
+			throw new Error('Transaction failed:' + error);
+		}
+	}
+
+	/**
+	* Updates the token's memo with the latest metadata hash and transaction signature.
+	*
+	* This function retrieves the memo associated with a product ID, updates it with the latest metadata hash,
+	* and sends a new transaction to the Solana blockchain to update the memo.
+	*
+	* @param ProductId - The ID of the product for which the token memo is being updated.
+	* @returns A promise that resolves to the transaction signature of the update.
+	* @throws If no memo or signature is found for the given Product ID, or if the transaction fails.
+	*/
+	public async UpdateTokenfromSignature(ProductId: string): Promise<string> {
+
+		const memo = await this.getMemoFromSignature(ProductId);
+		if (!memo) {
+			throw new Error("No memo found for the given Product ID.");
+		}
+		let signature = await this.getSignatureFromId(ProductId);
+		if (!signature) {
+			throw new Error("No signature found for the given Product ID.");
+		}
+		const memoData = SignatureSchema.parse(JSON.parse(memo));
+		const metadata = await this.getMetadataFromId(ProductId);
+		const newhashData = this.hashObject(metadata);
+		if (memoData.hash !== newhashData) {
+			memoData.hash = newhashData;
+			memoData.updatedAt = new Date().toISOString();
+			if (!memoData.lastUpdate) {
+				memoData.lastUpdate = [];
+			}
+			memoData.lastUpdate.push(memoData.hash);
+		}
+		else {
+			throw new Error("No update needed, hash is the same.");
+		}
+		let payer: Keypair = await this.getPayer();
+
+		const ataInstruction = await this.createIntruction(payer)
+		const memodata = JSON.stringify({
+			hash: memoData.hash,
+			updatedAt: memoData.updatedAt,
+			lastUpdate: memoData.lastUpdate || [],
+		});
+		try {
+			const signature = await this.sendTransactionWithMemo(payer, ataInstruction, memodata);
+			this.Setsignature(await this.getMetadataFromId(ProductId), signature);
 			return signature;
 		} catch (error) {
 			throw new Error('Transaction failed:' + error);
@@ -329,13 +443,16 @@ export class SafeoutSDK {
 	* @returns A promise that resolves to a string indicating whether the data is valid or not.
 	* @throws If fetching metadata or the memo fails internally.
 	*/
-	public async CheckOnBlockChain(ProductId: string): Promise<string> {
+	public async CheckOnBlockChain(ProductId: string): Promise<{ valid: boolean, reason?: string }> {
 		const metadata: ChipMetadata = await (this.getMetadataFromId(ProductId))
 		const hash = this.hashObject(metadata).toString();
 		let memo = await this.getMemoFromSignature(ProductId);
-		if (memo != hash)
-			return ("Not Valided by BlockChain");
-		return ("Valided by blockchain");
+		let memoData = SignatureSchema.parse(JSON.parse(memo));
+		if (memoData.hash !== hash) {
+			return { valid: false, reason: "Hash mismatch" };
+		}
+
+		return { valid: true };
 	}
 
 	/**
@@ -400,3 +517,36 @@ export class SafeoutSDK {
 		return (Data)
 	}
 };
+
+const sdk = new SafeoutSDK('Devnet',
+	'sha256',
+	"JWTOKEN",
+	new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
+	new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
+
+import readline from 'node:readline';
+async function main() {
+	const rl = readline.createInterface({
+		input: process.stdin,
+		output: process.stdout
+	});
+	rl.question('check or create or update token ?\n', async (answer: string) => {
+		switch (answer.toLowerCase()) {
+			case 'check':
+				console.log(await sdk.CheckOnBlockChain('abb9a98e-55f8-466e-81ee-248d41114658'));
+				break;
+			case 'create':
+				await sdk.createToken('abb9a98e-55f8-466e-81ee-248d41114658')
+				break;
+			case 'update':
+				await sdk.UpdateTokenfromSignature('abb9a98e-55f8-466e-81ee-248d41114658');
+				break;
+			default:
+				console.log('Invalid answer!');
+		}
+		rl.close();
+	}
+	)
+};
+
+main()
