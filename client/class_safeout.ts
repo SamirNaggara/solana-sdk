@@ -5,143 +5,46 @@ import { createHash } from 'crypto';
 import { createMemoInstruction, MEMO_PROGRAM_ID } from '@solana/spl-memo';
 import { getPayerKeypair } from './lib/solanaUtils';
 import { ChipMetadata } from './schema/metadata';
-import { request } from 'https';
-import fetch from 'node-fetch';
 import z from 'zod';
+import { PrismaClient } from '@prisma/client';
 
 
-/**
-* Interface for Solana-Mint-SDK for route.
-* If you don't have API just don't create the SDK whit options and its will use Safeout API
-*
-* @param getProducts - Route API for get Product value on your database (ChipMetadata)
-* @param newProduct - Route API for create a new Product on your database
-* @param updateProduct -  Route API for update a Product on your database
-* @param deleteProduct - Route API for delete a Product on your database
-* @param getPayerKeypair - Route API for get your Payerkeypair if not provide it take ./keypair.json
-*/
-export interface SafeoutSDKOptions {
-	getProducts?: string;
-	newProduct?: string;
-	updateProduct?: string;
-	deleteProduct?: string;
-	getPayerKeypair?: string | null;
-}
-
-/**
-* Type for network values used in the SDK.
-* This type defines the possible networks that can be used with the SDK.
-* It includes 'Mainnet', 'Testnet', and 'Devnet'.
-*/
 type NetworkValue = 'Mainnet' | 'Testnet' | 'Devnet';
 
-/**
-* Schema for validating ISO date strings.
-*
-* This schema checks if a string is a valid ISO date format.
-* It uses the `zod` library to ensure that the date can be parsed correctly.
-* If the date is invalid, it throws an error with a custom message.
-*/
 const isoDateString = z.string().refine(val => !isNaN(Date.parse(val)), {
 	message: "Must be a valid ISO date string",
 });
 
-/**
-* Schema for validating a signature object.
-*
-* This schema requires a `hash` string, an `updatedAt` ISO date string,
-* and an optional `lastUpdate` array of strings.
-* The `hash` must be a non-empty string, and `updatedAt` must be a valid ISO date.
-* The `lastUpdate` is optional and can be an array of non-empty strings.
-*/
 const signatureString = z.string().min(1, "Signature must be a non-empty string");
 
-/**
-* Schema for validating a signature object.
-*
-* This schema requires a `hash` string, an `updatedAt` ISO date string,
-* and an optional `lastUpdate` array of strings.
-* The `hash` must be a non-empty string, and `updatedAt` must be a valid ISO date.
-* The `lastUpdate` is optional and can be an array of non-empty strings.
-*/
 const SignatureSchema = z.object({
 	hash: z.string().min(1, "Hash is required"),
 	updatedAt: isoDateString,
-	lastUpdate: z.array(signatureString).optional(), // facultatif au premier enregistrement
+	lastUpdate: z.array(signatureString).optional(),
 });
 
-/**
-* Class representing the Safeout SDK.
-*
-* This class provides methods to interact with the Safeout API and the Solana blockchain.
-* It allows you to create, update, and check products on the blockchain,
-* as well as manage token mints and associated token accounts.
-*
-* @class SafeoutSDK
-* @param network - The network to use (Mainnet, Testnet, or Devnet).
-* @param hashAlgo - The algorithm to use for hashing (e.g., 'sha256').
-* @param JWToken - The JSON Web Token for authentication with the Safeout API.
-* @param mintAuthority - The public key of the mint authority.
-* @param owner - The public key of the owner of the tokens.
-* @param options - Optional parameters for API endpoints.
-* @property {PublicKey} mintAuthority - The public key of the mint authority.
-* @property {PublicKey} owner - The public key of the owner of the tokens.
-* @property {string} hashAlgo - The algorithm used for hashing.
-* @property {string} getProducts - The API endpoint for getting products.
-* @property {string} newProduct - The API endpoint for creating a new product.
-* @property {string} updateProduct - The API endpoint for updating a product.
-* @property {string} deleteProduct - The API endpoint for deleting a product.
-* @property {string | null} getPayerKeypair - The API endpoint for getting the payer keypair, or null if not provided.
-* @property {Connection} connection - The Solana connection object.
-* @property {string} JWToken - The JSON Web Token for authentication with the Safeout API.
-* @example
-* const sdk = new SafeoutSDK('Devnet', 'sha256', 'your-jwt-token', new PublicKey('your-mint-authority'), new PublicKey('your-owner-public-key'), {
-*   getProducts: 'http://website.com/API/get/',
-*   newProduct: 'http://website.com/API/new',
-*   updateProduct: 'http://website.com/API/update/',
-*   deleteProduct: 'http://website.com/API/delete/',
-*   getPayerKeypair: 'http://website.com/API/getPayerKeypair',
-* });
-*/
+
 export class SafeoutSDK {
 	private mintAuthority: PublicKey;
 	private owner: PublicKey;
 	private hashAlgo: string;
 
-	private getProducts: string;
-	private newProduct: string;
-	private updateProduct: string;
-	private deleteProduct: string;
-	private getPayerKeypair: string | null;
 	private connection: Connection;
 	private JWToken: string;
-	/**
-	 * Create class for Solana-Mint-SDK
-	 *
-	 * @param networkValue - network you want to use Devnet / Testnet / Mainnet
-	 * @param hashAlgo - The Algorim for the hash function (sha256 ...)
-	 * @param mintAuthority - The Publickey for your Mint
-	 * @param owner - The owner PublicKey
-	 * @param options - Options object for all API route (optionnal)
-	 */
+	private prisma: PrismaClient;
 	constructor(
 		network: NetworkValue,
 		hashAlgo: string,
 		JWToken: string,
 		mintAuthority: PublicKey,
 		owner: PublicKey,
-		options: SafeoutSDKOptions = {}
 	) {
+		this.prisma = new PrismaClient();
 		this.mintAuthority = mintAuthority;
 		this.hashAlgo = hashAlgo;
 		this.JWToken = JWToken;
 		this.owner = owner;
 		let url: string = '';
-		this.getProducts = options.getProducts || 'http://localhost:4000/RestApi/get/';
-		this.newProduct = options.newProduct || 'http://localhost:4000/RestApi/new';
-		this.updateProduct = options.updateProduct || 'http://localhost:4000/RestApi/update/';
-		this.deleteProduct = options.deleteProduct || 'http://localhost:4000/RestApi/delete/';
-		this.getPayerKeypair = options.getPayerKeypair || null;
 		if (network == 'Mainnet')
 			url = 'https://api.mainnet-beta.solana.com';
 		else if (network == 'Testnet')
@@ -150,99 +53,38 @@ export class SafeoutSDK {
 			url = 'https://api.devnet.solana.com';
 		this.connection = new Connection(url, 'confirmed');
 	}
+	/// UTILS
 
 	/**
-	* Retrieves the payer keypair from the specified API endpoint or local file.
-	*
-	* If `this.getPayerKeypair` is provided, it fetches the keypair from that URL.
-	* If not provided, it defaults to using the `getPayerKeypair` function to read from a local file.
-	*
-	* @returns A Promise that resolves to a Keypair object representing the payer's keypair.
-	* @throws If the request fails or the response cannot be parsed as a Keypair.
+	* Retrieves the payer keypair for the transaction.
+	* @async
+	* @function getPayer
+	* @description This function retrieves the payer keypair from the local environment.
+	* It is used to sign transactions and pay for fees on the Solana network.
+	* @throws Will throw an error if the payer keypair cannot be retrieved.
 	*/
 	private async getPayer(): Promise<Keypair> {
-		if (!this.getPayerKeypair) {
-			return await getPayerKeypair();
-		}
-
-		const response = await request(this.getPayerKeypair);
-		return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(response.toString())));
+		return await getPayerKeypair();
 	}
 
-	/**
-	* Converts a ChipMetadata object into a stable, deterministic JSON string.
-	* 
-	* The object keys are sorted alphabetically to ensure consistent output regardless of key order.
-	* If any value is a `PublicKey`, it is automatically converted to its base58 string representation.
-	* 
-	* This is useful when consistent string output is required, e.g., for hashing.
-	* 
-	* @param obj - The metadata object to stringify.
-	* @returns A stable JSON string representation of the object.
+	 /**
+	* Hashes a given object using the specified hashing algorithm.
+	* @param {string} obj - The object to hash, represented as a string.
+	* @returns {string} - The hexadecimal representation of the hash.
+	* @throws {Error} - If the hashing algorithm is not supported.
 	*/
-	public stableStringify(obj: ChipMetadata): string {
-		const allKeys = Object.keys(obj).sort();
-		const sortedObj: Record<string, unknown> = {};
-
-		for (const key of allKeys) {
-			const value = obj[key as keyof ChipMetadata];
-			sortedObj[key] = value instanceof PublicKey ? value.toBase58() : value;
-		}
-
-		return JSON.stringify(sortedObj);
-	}
-
-	/**
-	* Generates a SHA hash from a ChipMetadata object.
-	* 
-	* The metadata is first converted into a stable JSON string (sorted keys, `PublicKey`s serialized),
-	* then hashed using the algorithm specified by `this.hashAlgo` (e.g., 'sha256').
-	* 
-	* @param obj - The metadata object to hash.
-	* @returns A hexadecimal string representing the hash of the metadata.
-	*/
-	public hashObject(obj: ChipMetadata): string {
-		const json = this.stableStringify(obj);
+	public hashObject(obj: string): string {
 		const hash = createHash(this.hashAlgo);
-		hash.update(json);
+		hash.update(obj);
 		return hash.digest('hex');
 	}
+	// Blockchain only
 
 	/**
-	* Set the signature of the transaction in the product data in data base
-	* 
-	* Apply a PATCH throw the API
-	* 
-	* @param privateMetadata - The object you want to update.
-	* @param signature - The Signature of the transaction
-	*/
-	public async Setsignature(privateMetadata: ChipMetadata, signature: string) {
-		const updates = { "signature": signature };
-
-		const response = await fetch(this.updateProduct + privateMetadata.id, {
-			method: 'PATCH',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': 'Bearer ' + this.JWToken
-			},
-			body: JSON.stringify(updates),
-		});
-		if (response.status !== 200) {
-			const data = await response.json() as { message: string };;
-			console.error(response.status + " " + response.statusText + " " + data.message);
-			throw new Error("Update object for signature failed");
-		}
-	}
-
-	/**
-	* Creates a transaction instruction to create an associated token account for the owner.
-	*
-	* This method generates a new mint, creates an associated token account for the owner,
-	* and returns a transaction instruction that can be used to execute this operation.
-	*
-	* @param payer - The Signer who will pay for the transaction and sign it.
-	* @returns A Promise that resolves to a TransactionInstruction for creating the associated token account.
-	* @throws If the mint creation fails, it throws an error with details.
+	*  Creates a transaction instruction to create an associated token account for the owner.
+	* @param {Signer} payer - The signer who will pay for the transaction.
+	* @returns {Promise<TransactionInstruction>} - A transaction instruction to create the associated token account.
+	* @throws {Error} - If the mint creation fails or if the associated token account cannot be created.
 	*/
 	private async createIntruction(payer: Signer): Promise<TransactionInstruction> {
 		const mint = await createMint(this.connection, payer, this.mintAuthority, null, 0);
@@ -265,16 +107,12 @@ export class SafeoutSDK {
 	}
 
 	/**
-	* Sends a transaction to create an associated token account and attach a memo.
-	*
-	* This method constructs a transaction that includes an instruction to create an associated token account
-	* and a memo instruction containing the provided memo string.
-	*
-	* @param payer - The Keypair of the payer who will sign and pay for the transaction.
-	* @param ataInstruction - The instruction to create the associated token account.
-	* @param memo - The memo string to be included in the transaction.
-	* @returns A promise that resolves to the transaction signature.
-	* @throws If the transaction fails, it throws an error with details.
+	*  Sends a transaction with a memo instruction.
+	* @param {Keypair} payer - The payer keypair who will sign the transaction.
+	* @param {TransactionInstruction} ataInstruction - The instruction to create the associated token account.
+	* @param {string} memo - The memo to include in the transaction.
+	* @returns {Promise<string>} - The signature of the confirmed transaction.
+	* @throws {Error} - If the transaction fails to send or confirm.
 	*/
 	private async sendTransactionWithMemo(
 		payer: Keypair,
@@ -295,21 +133,117 @@ export class SafeoutSDK {
 			commitment: 'confirmed',
 		});
 	}
-
+	// DATABASE
 
 	/**
-	* Creates a new token mint and associated token account, then stores a hash of the provided metadata using a memo instruction.
-	* 
-	* The function:
-	*  - Creates a new SPL token mint.
-	*  - Creates an associated token account (ATA) for the owner.
-	*  - Hashes the provided private metadata and stores it on-chain in a memo.
-	* 
-	* This is useful for securely attaching off-chain metadata to an on-chain token without revealing the data itself.
-	* 
-	* @param Product - The Product ID you want to hash and embed in the transaction memo.
-	* @returns A string containing the transaction signature.
-	* @throws If the transaction fails, it throws an error with details.
+	*  Creates a new product in the database.
+	* @param {string} ProductId - The ID of the product to create.
+	* @param {object} info - The metadata information for the product.
+	* @returns {Promise<void>} - A promise that resolves when the product is created.
+	* @throws {Error} - If a product with the given ID already exists.
+	*/
+	public async createProduct(ProductId: string, info: object): Promise<void> {
+		const existingProduct = await this.prisma.product.findUnique({
+			where: { id: ProductId },
+		});
+		if (existingProduct) {
+			throw new Error(`Product with ID ${ProductId} already exists.`);
+		}
+		await this.prisma.product.create({
+			data: {
+				id: ProductId,
+				info: info,
+				signature: "",
+			},
+		});
+	}
+
+	/**
+	*  Retrieves the memo associated with a given product signature.
+	* @param {string} ProductId - The ID of the product to retrieve the memo for.
+	* @returns {Promise<string | null>} - The memo associated with the product signature, or null if not found.
+	* @throws {Error} - If the product with the given ID does not exist.
+	*/
+	public async getMetadataFromId(ProductId: string): Promise<string> {
+		const product = await this.prisma.product.findUnique({
+			where: { id: ProductId },
+		});
+		if (!product) {
+			throw new Error(`Product with ID ${ProductId} not found.`);
+		}
+		return JSON.stringify(product.info);
+	}
+
+	/**
+	*  Sets the signature for a product based on its ID.
+	* @param {string} ProductId - The ID of the product to set the signature for.
+	* @param {string} signature - The signature to set for the product.
+	* @returns {Promise<void>} - A promise that resolves when the signature is set.
+	* @throws {Error} - If the product with the given ID does not exist or if a signature already exists for that product.
+	*/
+	public async SetSignatureFromId(ProductId: string, signature: string): Promise<void> {
+		const product = await this.prisma.product.findUnique({
+			where: { id: ProductId },
+		});
+		if (!product) {
+			throw new Error(`Product with ID ${ProductId} not found.`);
+		}
+		if (product.signature) {
+			throw new Error(`Signature already exists for Product ID ${ProductId}.`);
+		}
+		await this.prisma.product.update({
+			where: { id: ProductId },
+			data: { signature: signature },
+		});
+	}
+
+	/**
+	*  Retrieves the memo associated with a given product signature.
+	* @param {string} ProductId - The ID of the product to retrieve the memo for.
+	* @returns {Promise<string | null>} - The memo associated with the product signature, or null if not found.
+	* @throws {Error} - If the product with the given ID does not exist.
+	*/
+	public async getSignatureFromId(ProductId: string): Promise<string | null> {
+		const product = await this.prisma.product.findUnique({
+			where: { id: ProductId },
+			select: { signature: true },
+		});
+		if (!product) {
+			throw new Error(`Product with ID ${ProductId} not found.`);
+		}
+		return product.signature || null;
+	}
+
+	/**
+	*  Retrieves the memo associated with a given product signature.
+	* @param {string} ProductId - The ID of the product to retrieve the memo for.
+	* @returns {Promise<string | null>} - The memo associated with the product signature, or null if not found.
+	* @throws {Error} - If the product with the given ID does not exist or if no memo is found.
+	*/
+	public async getMetadataFromIdArray(ProductIdArray: string[]): Promise<object[]> {
+		const products = await this.prisma.product.findMany({
+			where: {
+				id: {
+					in: ProductIdArray,
+				},
+			},
+			select: { info: true },
+		});
+		if (!products || products.length === 0) {
+			throw new Error(`No products found for the provided IDs.`);
+		}
+		return products
+			.map(product => product.info)
+			.filter((info): info is object => info !== null && typeof info === 'object');
+	}
+
+	// OTHER
+
+	/**
+	* Creates a token for a given Product ID.
+	* @param ProductId - The ID of the product to create a token for.
+	* @returns The signature of the transaction that created the token.
+	* @throws Will throw an error if a token has already been created for the given Product ID or if the transaction fails.
 	*/
 	public async createToken(ProductId: string): Promise<string> {
 
@@ -330,7 +264,7 @@ export class SafeoutSDK {
 
 		try {
 			const signature = await this.sendTransactionWithMemo(payer, ataInstruction, memodata);
-			this.Setsignature(privateMetadata, signature);
+			this.SetSignatureFromId(ProductId, signature);
 			return signature;
 		} catch (error) {
 			throw new Error('Transaction failed:' + error);
@@ -338,14 +272,10 @@ export class SafeoutSDK {
 	}
 
 	/**
-	* Updates the token's memo with the latest metadata hash and transaction signature.
-	*
-	* This function retrieves the memo associated with a product ID, updates it with the latest metadata hash,
-	* and sends a new transaction to the Solana blockchain to update the memo.
-	*
-	* @param ProductId - The ID of the product for which the token memo is being updated.
-	* @returns A promise that resolves to the transaction signature of the update.
-	* @throws If no memo or signature is found for the given Product ID, or if the transaction fails.
+	*  Updates the token for a given Product ID based on the signature.
+	* @param {string} ProductId - The ID of the product to update the token for.
+	* @returns {Promise<string>} - The signature of the transaction that updated the token.
+	* @throws {Error} - If no memo or signature is found for the given Product ID, or if no update is needed.
 	*/
 	public async UpdateTokenfromSignature(ProductId: string): Promise<string> {
 
@@ -366,7 +296,7 @@ export class SafeoutSDK {
 			if (!memoData.lastUpdate) {
 				memoData.lastUpdate = [];
 			}
-			memoData.lastUpdate.push(memoData.hash);
+			memoData.lastUpdate.push(signature);
 		}
 		else {
 			throw new Error("No update needed, hash is the same.");
@@ -381,50 +311,68 @@ export class SafeoutSDK {
 		});
 		try {
 			const signature = await this.sendTransactionWithMemo(payer, ataInstruction, memodata);
-			this.Setsignature(await this.getMetadataFromId(ProductId), signature);
+			this.SetSignatureFromId(signature, ProductId);
 			return signature;
 		} catch (error) {
 			throw new Error('Transaction failed:' + error);
 		}
 	}
 
-	/**
-	* Type guard to check whether an instruction is a `ParsedInstruction`.
-	* 
-	* This helps safely access the `parsed` field in transactions.
-	* 
+	// public async batchMint(ProductIdArray: string[]): Promise<string[]> {
+	// 	const ProductDataArray: object[] = await this.getMetadataFromIdArray(ProductIdArray);
+	// 	const signatures: string[] = [];
+	// 	for (const Product of ProductDataArray) {
+	// 		try {
+	// 			const sortedEntries = Object.entries(Product).sort(([keyA], [keyB]) =>
+	// 				keyA.localeCompare(keyB));
+	// 			const sortedJson = Object.fromEntries(sortedEntries);
+	// 			const sortedJsonString = JSON.stringify(sortedJson, null, 2);
+	// 			if (!this.checkifSignatureExist(Product)) {
+	// 				const signature = await this.createToken(sortedJsonString);
+	// 				signatures.push(signature);
+	// 			}
+	// 			else {
+	// 				const signature = await this.UpdateTokenfromSignature(sortedJsonString);
+	// 				signatures.push(signature);
+	// 			}
+	// 		} catch (error) {
+	// 			console.error(`Failed to mint token for Product ID ${Product}:`, error);
+	// 		}
+	// 	}
+	// 	return signatures;
+	// }
+
+    /**
+	* Checks if the instruction is a parsed instruction.
 	* @param instruction - The instruction to check.
-	* @returns `true` if the instruction is a `ParsedInstruction`, otherwise `false`.
+	* @returns True if the instruction is a parsed instruction, false otherwise.
 	*/
 	public isParsedInstruction(instruction: ParsedInstruction | PartiallyDecodedInstruction): instruction is ParsedInstruction {
 		return (instruction as ParsedInstruction).parsed !== undefined;
 	}
 
 	/**
-	* Extracts the memo from a transaction given its signature.
-	* 
-	* Searches through the instructions in a parsed transaction and returns the content of the memo.
-	* 
-	* @param IdProduct - The product Id you want the Memo.
-	* @returns The memo string stored in the transaction.
-	* @throws If the transaction is not found or does not contain a memo instruction.
+	* Retrieves the memo from a transaction signature.
+	* @param IdProduct - The ID of the product to retrieve the memo for.
+	* @returns The memo associated with the product ID.
+	* @throws Will throw an error if no signature is found for the product ID or if the memo is not found in the transaction.
 	*/
 	public async getMemoFromSignature(IdProduct: string): Promise<string> {
-		let signature = await this.getSignatureFromId(IdProduct);
-		if (!signature)
-			throw new Error("No signature for" + IdProduct);
+		const signature = await this.getSignatureFromId(IdProduct);
+		if (!signature) {
+			throw new Error("No signature for " + IdProduct);
+		}
+
 		const tx = await this.connection.getParsedTransaction(signature, {
 			commitment: "confirmed",
 		});
 
 		if (!tx) {
-			throw new Error("Transaction not found.")
+			throw new Error("Transaction not found.");
 		}
 
-		const memopublicKey = MEMO_PROGRAM_ID;
-
 		for (const inner of tx.transaction.message.instructions) {
-			if (inner.programId.equals(memopublicKey)) {
+			if (inner.programId.equals(MEMO_PROGRAM_ID)) {
 				if (this.isParsedInstruction(inner)) {
 					return inner.parsed;
 				}
@@ -434,93 +382,25 @@ export class SafeoutSDK {
 	}
 
 	/**
-	* Verifies if a product's metadata matches the hash stored on the blockchain.
-	* 
-	* Retrieves the metadata of a product using its ID, generates a hash from this metadata,
-	* and compares it with the memo field stored on-chain (retrieved using the product's signature).
-	* 
-	* @param ProductId - The ID of the product to verify on the blockchain.
-	* @returns A promise that resolves to a string indicating whether the data is valid or not.
-	* @throws If fetching metadata or the memo fails internally.
+	* Checks if the product is valid on the blockchain by verifying the hash in the memo against the metadata.
+	* @param ProductId - The ID of the product to check.
+	* @returns An object indicating whether the product is valid and, if not, the reason for its invalidity.
 	*/
 	public async CheckOnBlockChain(ProductId: string): Promise<{ valid: boolean, reason?: string }> {
-		const metadata: ChipMetadata = await (this.getMetadataFromId(ProductId))
-		const hash = this.hashObject(metadata).toString();
-		let memo = await this.getMemoFromSignature(ProductId);
-		let memoData = SignatureSchema.parse(JSON.parse(memo));
+		const metadata: string = await (this.getMetadataFromId(ProductId))
+		const hash = this.hashObject(metadata);
+		const memo = await this.getMemoFromSignature(ProductId);
+		const memoData = SignatureSchema.parse(JSON.parse(memo));
 		if (memoData.hash !== hash) {
 			return { valid: false, reason: "Hash mismatch" };
 		}
-
 		return { valid: true };
-	}
-
-	/**
-	* Retrieves the transaction signature associated with a given product ID.
-	* 
-	* Sends a request to the product endpoint and extracts the transaction signature
-	* from the response data.
-	* 
-	* @param ProductId - The ID of the product to retrieve the signature for.
-	* @returns A promise that resolves to the transaction signature string.
-	* @throws If the HTTP request fails or the response status is not 200.
-	*/
-	public async getSignatureFromId(ProductId: string): Promise<string | null> {
-		let signature;
-
-		const response = await fetch(this.getProducts + ProductId, {
-			headers: {
-				'Authorization': 'Bearer ' + this.JWToken,
-			}
-		});
-		if (response.status != 200)
-			throw new Error("Error get Metadata");
-		let data: any = await response.json();
-		try {
-			signature = data.product.additionalInfo.signature.value;
-			return (signature);
-		}
-		catch (error) {
-			return (null)
-		}
-	}
-
-	/**
-	* Retrieves the chip metadata associated with a given product ID.
-	* 
-	* Fetches the product data and constructs a ChipMetadata object based on the response.
-	* Useful for displaying product information such as name, description, and default ownership.
-	* 
-	* @param ProductId - The ID of the product to retrieve metadata for.
-	* @returns A promise that resolves to a ChipMetadata object containing the product's details.
-	* @throws If the HTTP request fails or the response status is not 200.
-	*/
-	public async getMetadataFromId(ProductId: string): Promise<ChipMetadata> {
-		let Data: ChipMetadata;
-
-		const response = await fetch(this.getProducts + ProductId, {
-			headers: {
-				'Authorization': 'Bearer ' + this.JWToken,
-			}
-		});
-		if (response.status != 200)
-			throw new Error("Error get Metadata");
-		let data: any = await response.json()
-		Data = {
-			id: ProductId,
-			name: data.product.name,
-			description: data.product.attributes.description.value,
-			isStolen: false,
-			extraInfo: "",
-			owner: new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
-		};
-		return (Data)
 	}
 };
 
 const sdk = new SafeoutSDK('Devnet',
 	'sha256',
-	"JWTOKEN",
+	"eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.eyJjb21wYW55Ijp7ImlkIjoic2FmZW91dCIsImltYWdlVXJsIjpudWxsLCJjcmVhdGVkQXQiOiIyMDI1LTA2LTE2VDExOjA1OjMzLjk2NFoiLCJ1cGRhdGVkQXQiOiIyMDI1LTA2LTE2VDExOjA1OjMzLjk2NFoiLCJuYW1lIjoiU2FmZW91dCIsImNyZWRpdHMiOjAsInN1YmRvbWFpbiI6bnVsbCwidXNlcnMiOltdLCJyZWdpc3RyYXRpb25OdW1iZXIiOm51bGwsInRheElkIjpudWxsLCJjb21wYW55VHlwZSI6bnVsbCwiaW5kdXN0cnkiOm51bGwsInNvY2lhbE5ldHdvcmtzIjpudWxsLCJ0ZW1wbGF0ZSI6bnVsbCwid2hpdGVsYWJlbENvbmZpZyI6bnVsbCwid2hpbGFiZWxDb25maWciOm51bGwsInNlY3VyZU1vZGUiOmZhbHNlLCJzdGF0ZVNlY3VyaXR5IjpmYWxzZX0sImlhdCI6MTc1MDA3ODgzNywiZXhwIjoxNzUwMTY1MjM3fQ.DMqyQTTD5kO2zgKJuM4sO9UhXTiEvubkW0Wg6cby5t8vA5nt35PFcju3bho3tRTuv1nk4WO5MwRi8i-ZnCPe-uaGvAUAxhD6Kgd_rOURCpagOIoEkQjDeDPjtTVvF4ckhIY6xSRYqGujf_-9iiEie8LggRyGwB4k_tXk1nmdvrlcWJizAvcjaXjTPl6na-XuDzzkdjwfKaX1PYtyFOmqJcshvX87ldy8Iih55aKDjAUPfVrmnICSvk8kvmyUDx0pgUVJQ6s9HtIgLk_A_OsBj-EZRA_kqoZOvj2wUKgFUR-r86duIGIrful0w1dnHfh7OhDlLJYN0rpS_iQTNFlpGOkDg1Y4IaooIWsxMN5y6meT9ICl0dsg-BAJ0HDHDCTagEQnAHl6NlRLKEjQtECl8d2Zgp1jxH9S7LJaMjU8ElVTCllC2vwvEb_kncZmQYwtOpmJtDe7NP33pXRnT6K5TXZX0sB9VGNa6mlesMq703Zfq2T5xIpbVhPVXAv_trft0acxUE8-t-GWqaVot1JkJeC6AIU_vVzQFjiHz-N_qV3Wi9cZUfONxOBV_qJH7VCAZKbN6MJbrVAUTZlsXDf7ukefKdYeRR4Zt3cvu9Sfaz42TVONAGuj0KQG6Y4UV_2m6BkXLvHHgnUtoTFy41_UJfPmQkKp9_Oxs8cl55CNce0",
 	new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
 	new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
 
@@ -530,7 +410,7 @@ async function main() {
 		input: process.stdin,
 		output: process.stdout
 	});
-	rl.question('check or create or update token ?\n', async (answer: string) => {
+	rl.question('check or create or update token or batch ?\n', async (answer: string) => {
 		switch (answer.toLowerCase()) {
 			case 'check':
 				console.log(await sdk.CheckOnBlockChain('abb9a98e-55f8-466e-81ee-248d41114658'));
@@ -541,6 +421,14 @@ async function main() {
 			case 'update':
 				await sdk.UpdateTokenfromSignature('abb9a98e-55f8-466e-81ee-248d41114658');
 				break;
+			case 'cc':
+				await sdk.createProduct('abb9a98e-55f8-466e-81ee-248d41114658', {
+					name: 'Test Product',
+					description: 'This is a test product',
+				});
+				break;
+			// case 'batch':
+			// 	await sdk.batchMint(['abb9a98e-55f8-466e-81ee-248d41114658', 'afdsqfd98e-55f8-466e-81ee-248d41114659'])
 			default:
 				console.log('Invalid answer!');
 		}
