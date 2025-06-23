@@ -7,7 +7,7 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model Product {
+model ProductDPP {
   id        String   @id
   info      Json
   signature String?
