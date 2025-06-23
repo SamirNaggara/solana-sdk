@@ -57,7 +57,7 @@ export class SafeoutSDK {
 	* @returns The signature of the transaction that created the token.
 	* @throws Will throw an error if a token has already been created for the given Product ID or if the transaction fails.
 	*/
-	public async createToken(ProductId: string): Promise<string> {
+	public async createMintToken(ProductId: string): Promise<string> {
 
 		if (this.mint === null) {
 			this.mint = await this.initializeMint();
@@ -92,7 +92,7 @@ export class SafeoutSDK {
 	* @returns {Promise<string>} - The signature of the transaction that updated the token.
 	* @throws {Error} - If no memo or signature is found for the given Product ID, or if no update is needed.
 	*/
-	public async UpdateTokenfromID(ProductId: string): Promise<string> {
+	public async UpdateMintToken(ProductId: string): Promise<string> {
 
 		if (this.mint === null) {
 			this.mint = await this.initializeMint();
@@ -143,7 +143,7 @@ export class SafeoutSDK {
 	* @returns {Promise<string[]>} - A promise that resolves to an array of signatures for the minted tokens.
 	* @throws {Error} - If any minting operation fails, it will log the error and continue with the next product.
 	*/
-	public async batchMint(ProductIdArray: string[], concurrency: number = 10): Promise<string[]> {
+	public async batchMintToken(ProductIdArray: string[], concurrency: number = 10): Promise<string[]> {
 		const ProductDataArray: object[] = await this.getMetadataFromIdArray(ProductIdArray);
 		const results: string[] = [];
 	
@@ -168,9 +168,9 @@ export class SafeoutSDK {
 
 					let signature: string | null;
 					if (!(await this.checkSignaturebyID(ProductId))) {
-						signature = await this.createToken(ProductId);
+						signature = await this.createMintToken(ProductId);
 					} else {
-						signature = await this.UpdateTokenfromID(ProductId);
+						signature = await this.UpdateMintToken(ProductId);
 					}
 
 					if (signature) {
@@ -481,10 +481,10 @@ async function mainLoop() {
 					console.log(await sdk.CheckAuthenticityOnBlockchain('26358076-bd39-4775-b714-d253de5da8c8'))
 					break
 				case 'create':
-					await sdk.createToken('afdsqfd98e-55f8-466e-81ee-248d41114658')
+					await sdk.createMintToken('afdsqfd98e-55f8-466e-81ee-248d41114658')
 					break
 				case 'update':
-					await sdk.UpdateTokenfromID('afdsqfd98e-55f8-466e-81ee-248d41114658')
+					await sdk.UpdateMintToken('afdsqfd98e-55f8-466e-81ee-248d41114658')
 					break
 				case 'cc':
 					await sdk.createProduct('afdsqfd98e-55f8-466e-81ee-248d41114658', {
@@ -496,7 +496,7 @@ async function mainLoop() {
 					const ids = await GetIDProductDPP();
 					console.log('Batch minting for :', ids.length, 'products');
 					if (Array.isArray(ids) && ids.length > 0) {
-						await sdk.batchMint(ids);
+						await sdk.batchMintToken(ids);
 					} else {
 						console.error('No product IDs found for batch mint.');
 					}
