@@ -8,10 +8,6 @@ import { PrismaClient } from '@prisma/client';
 import Bottleneck from "bottleneck";
 import { GetIDProductDPP } from './GetIdProuctDPP';
 
-import cliProgress from 'cli-progress';
-
-
-
 type NetworkValue = 'Mainnet' | 'Testnet' | 'Devnet';
 
 const isoDateString = z.string().refine(val => !isNaN(Date.parse(val)), {
@@ -112,17 +108,16 @@ export class SafeoutSDK {
 		const memoData = SignatureSchema.parse(JSON.parse(memo));
 		const metadata = await this.getMetadataFromId(ProductId);
 		const newhashData = this.hashObject(metadata);
-		if (memoData.hash !== newhashData) {
-			memoData.hash = newhashData;
-			memoData.updatedAt = new Date().toISOString();
-			if (!memoData.lastUpdate) {
-				memoData.lastUpdate = [];
-			}
-			memoData.lastUpdate.push(signature);
-		}
-		else {
+		if (memoData.hash === newhashData) {
 			throw new Error("No update needed, hash is the same.");
 		}
+		memoData.hash = newhashData;
+		memoData.updatedAt = new Date().toISOString();
+		if (!memoData.lastUpdate) {
+			memoData.lastUpdate = [];
+		}
+		memoData.lastUpdate.push(signature);
+
 		let payer: Keypair = await this.getPayer();
 
 		const ataInstruction = await this.createIntruction(payer)
@@ -151,16 +146,10 @@ export class SafeoutSDK {
 	public async batchMint(ProductIdArray: string[], concurrency: number = 10): Promise<string[]> {
 		const ProductDataArray: object[] = await this.getMetadataFromIdArray(ProductIdArray);
 		const results: string[] = [];
-		let i = 1;
 	
-		try {
-		if (!(await this.checkSignaturebyID((ProductIdArray[0])))) {
-						results.push(await this.createToken((ProductIdArray[0])));
-					} else {
-						results.push(await this.UpdateTokenfromID((ProductIdArray[0])));
-					}}
-		catch (error: any) {
-			console.error(error.message || error);}
+		if (this.mint === null) {
+			this.mint = await this.initializeMint();
+		}
 		const limiter = new Bottleneck({
 			maxConcurrent: concurrency,
 			minTime: 100,
@@ -197,19 +186,19 @@ export class SafeoutSDK {
 	}
 
 	/**
-	* Checks if the product is valid on the blockchain by verifying the hash in the memo against the metadata.
+	* Check if the local datas of the product match the hash in the blockchain.
 	* @param ProductId - The ID of the product to check.
 	* @returns An object indicating whether the product is valid and, if not, the reason for its invalidity.
 	*/
-	public async CheckOnBlockChain(ProductId: string): Promise<{ valid: boolean, reason?: string }> {
+	public async CheckAuthenticityOnBlockchain(ProductId: string): Promise<{ isValid: boolean, reason?: string }> {
 		const metadata: string = await (this.getMetadataFromId(ProductId))
 		const hash = this.hashObject(metadata);
 		const memo = await this.getMemoFromSignature(ProductId);
 		const memoData = SignatureSchema.parse(JSON.parse(memo));
 		if (memoData.hash !== hash) {
-			return { valid: false, reason: "Hash mismatch" };
+			return { isValid: false, reason: "Hash mismatch" };
 		}
-		return { valid: true };
+		return { isValid: true };
 	}
 
 	private async initializeMint(): Promise<PublicKey> {
@@ -262,19 +251,19 @@ export class SafeoutSDK {
 		);
 
 		const accountInfo = await this.connection.getAccountInfo(associatedTokenAccount);
-		if (accountInfo === null) {
-			const ataInstruction = createAssociatedTokenAccountInstruction(
-				payer.publicKey,
-				associatedTokenAccount,
-				this.owner,
-				this.mint,
-				TOKEN_PROGRAM_ID,
-				ASSOCIATED_TOKEN_PROGRAM_ID
-			);
-
-			return ataInstruction;
+		if (accountInfo) {
+			return null; // Associated token account already exists, no need to create it.
 		}
-		return null;
+		const ataInstruction = createAssociatedTokenAccountInstruction(
+			payer.publicKey,
+			associatedTokenAccount,
+			this.owner,
+			this.mint,
+			TOKEN_PROGRAM_ID,
+			ASSOCIATED_TOKEN_PROGRAM_ID
+		);
+
+		return ataInstruction;
 	}
 
 	/**
@@ -464,4 +453,67 @@ export class SafeoutSDK {
 	}
 
 };
+
+const sdk = new SafeoutSDK('Testnet',
+	'sha256',
+	new PublicKey('4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1'),
+	new PublicKey('9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ'))
+
+import readline from 'node:readline';
+import { fi } from 'zod/v4/locales';
+const rl = readline.createInterface({
+	input: process.stdin,
+	output: process.stdout,
+})
+
+function askQuestion(question: string): Promise<string> {
+	return new Promise((resolve) => {
+		rl.question(question, resolve)
+	})
+}
+
+async function mainLoop() {
+	while (true) {
+		const answer = await askQuestion('check or create or update or batch ?\n')
+		try {
+			switch (answer.toLowerCase()) {
+				case 'check':
+					console.log(await sdk.CheckAuthenticityOnBlockchain('26358076-bd39-4775-b714-d253de5da8c8'))
+					break
+				case 'create':
+					await sdk.createToken('afdsqfd98e-55f8-466e-81ee-248d41114658')
+					break
+				case 'update':
+					await sdk.UpdateTokenfromID('afdsqfd98e-55f8-466e-81ee-248d41114658')
+					break
+				case 'cc':
+					await sdk.createProduct('afdsqfd98e-55f8-466e-81ee-248d41114658', {
+						name: 'Test Product',
+						description: 'This is a test product',
+					})
+					break
+				case 'batch': {
+					const ids = await GetIDProductDPP();
+					console.log('Batch minting for :', ids.length, 'products');
+					if (Array.isArray(ids) && ids.length > 0) {
+						await sdk.batchMint(ids);
+					} else {
+						console.error('No product IDs found for batch mint.');
+					}
+					break;
+				}
+				case 'exit':
+					console.log('Bye!')
+					rl.close()
+					process.exit(0)
+				default:
+					console.log('Invalid answer!')
+			}
+		} catch (error) {
+			console.error('An error occurred:', error);
+		}
+	}
+}
+
+mainLoop()
 
