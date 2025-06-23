@@ -11,6 +11,9 @@
     "@solana/spl-memo": "^0.2.5",
     "@solana/spl-token": "^0.3.0",
     "@solana/web3.js": "^1.98.2",
+    "@types/cli-progress": "^3.11.6",
+    "bottleneck": "^2.19.5",
+    "cli-progress": "^3.12.0",
     "node-fetch": "^3.3.2",
     "prisma": "^6.9.0",
     "zod": "^3.25.64"
