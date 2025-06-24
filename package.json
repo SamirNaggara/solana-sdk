@@ -1,8 +1,10 @@
 {
-  "name": "solana-token-project",
-  "version": "1.0.0",
+  "name": "safeoutsolana",
+  "version": "1.0.4",
   "description": "Solana Token Minting Project",
-  "main": "index.ts",
+  "main": "dist/client/class_safeout.js",
+  "types": "dist/client/class_safeout.d.ts",
+  "files": ["dist"],
   "scripts": {
     "start": "ts-node mintToken.ts"
   },
