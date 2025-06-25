@@ -22,7 +22,11 @@ import { getPayerKeypair } from "./lib/solanaUtils";
 import z from "zod";
 import { PrismaClient } from "@prisma/client";
 import Bottleneck from "bottleneck";
-import { GetIDProductDPP } from "./GetIdProuctDPP"; // kept for external CLI usage
+import { GetIDProductDPP } from "./GetIdProuctDPP";
+import { execSync } from 'child_process';
+import { writeFileSync, mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 /** Supported Solana cluster names */
 export type NetworkValue = "Mainnet" | "Testnet" | "Devnet";
@@ -31,6 +35,11 @@ export type NetworkValue = "Mainnet" | "Testnet" | "Devnet";
 /*                                Helper types                                */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Runtime‑validated shape of a product metadata object.
+ * This is a placeholder and should be replaced with actual metadata schema.
+ * The metadata can be anything, but it must be a valid JSON object.
+ */
 const isoDateString = z.string().refine((val) => !isNaN(Date.parse(val)), {
   message: "Must be a valid ISO‑8601 string",
 });
@@ -64,30 +73,79 @@ export class SafeoutSDK {
   private owner: PublicKey;
   private hashAlgo: string;
   private connection: Connection;
-  private prisma: PrismaClient;
+  private prisma: PrismaClient | null;
+  private databaseUrl: string;
   private mint: PublicKey | null;
 
   constructor(
     network: NetworkValue,
     hashAlgo: string,
     mintAuthority: PublicKey,
-    owner: PublicKey
+    owner: PublicKey,
+    databaseUrl: string
   ) {
-    this.prisma = new PrismaClient();
+    
     this.mintAuthority = mintAuthority;
     this.hashAlgo = hashAlgo;
     this.owner = owner;
-
+    this.databaseUrl = databaseUrl;
+    this.prisma = null;
     /* Select RPC endpoint based on the cluster name */
     const url =
       network === "Mainnet"
         ? "https://api.mainnet-beta.solana.com"
         : network === "Testnet"
-        ? "https://api.testnet.solana.com"
-        : "https://api.devnet.solana.com";
+          ? "https://api.testnet.solana.com"
+          : "https://api.devnet.solana.com";
 
     this.connection = new Connection(url, "confirmed");
     this.mint = null; // lazy‑initialised on first mint
+  }
+
+  /* ----------------------------------------------------------------------- */
+  /*                           Initialization Prisma                         */
+  /* ----------------------------------------------------------------------- */
+  private async setupPrisma(databaseUrl: string): Promise<PrismaClient> {
+    const tempDir = mkdtempSync(join(tmpdir(), 'safeout-prisma-'));
+    const schemaPath = join(tempDir, 'schema.prisma');
+
+    const schema = `
+    datasource db {
+      provider = "postgresql"
+      url      = "${databaseUrl}"
+    }
+
+    generator client {
+      provider = "prisma-client-js"
+    }
+
+    model ProductDPP {
+      id        String   @id
+      info      Json
+      signature String?
+    }
+  `;
+
+    writeFileSync(schemaPath, schema);
+
+    try {
+      execSync(`npx prisma db push --schema="${schemaPath}"`, {
+        stdio: 'inherit',
+      });
+    } catch (err) {
+      throw new Error(`Prisma setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const prisma = new PrismaClient({
+      datasources: {
+        db: {
+          url: databaseUrl,
+        },
+      },
+    });
+
+    await prisma.$connect();
+    return prisma;
   }
 
   /* ----------------------------------------------------------------------- */
@@ -102,6 +160,9 @@ export class SafeoutSDK {
   public async createDppProduct(
     productInput: ProductInput
   ): Promise<MintResult> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     const exists = await this.prisma.productDPP.findUnique({
       where: { id: productInput.productUid },
     });
@@ -136,6 +197,9 @@ export class SafeoutSDK {
     products: ProductInput[],
     concurrency = 10
   ): Promise<MintResult[]> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     // Fetch existing IDs in a single query for efficiency
     const ids = products.map((p) => p.productUid);
     const existing = await this.prisma.productDPP.findMany({
@@ -164,7 +228,7 @@ export class SafeoutSDK {
     // Persist signatures in a single transaction for atomicity
     await this.prisma.$transaction(
       minted.map((m) =>
-        this.prisma.productDPP.update({
+        this.prisma!.productDPP.update({
           where: { id: m.productUid },
           data: { signature: m.signature },
         })
@@ -184,6 +248,9 @@ export class SafeoutSDK {
    * @param info       – New metadata object.
    */
   public async updateDppProduct(product: ProductInput): Promise<MintResult> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     // 1️⃣ Update metadata in the database
     await this.prisma.productDPP.update({
       where: { id: product.productUid },
@@ -216,6 +283,9 @@ export class SafeoutSDK {
     products: ProductInput[],
     concurrency = 10
   ): Promise<MintResult[]> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     const ids = products.map((p) => p.productUid);
     const existing = await this.prisma.productDPP.findMany({
       where: { id: { in: ids } },
@@ -239,7 +309,7 @@ export class SafeoutSDK {
     if (toUpdate.length) {
       await this.prisma.$transaction(
         toUpdate.map((p) =>
-          this.prisma.productDPP.update({
+          this.prisma!.productDPP.update({
             where: { id: p.productUid },
             data: { info: p.info },
           })
@@ -254,7 +324,7 @@ export class SafeoutSDK {
 
     await this.prisma.$transaction(
       minted.map((m) =>
-        this.prisma.productDPP.update({
+        this.prisma!.productDPP.update({
           where: { id: m.productUid },
           data: { signature: m.signature },
         })
@@ -480,6 +550,9 @@ export class SafeoutSDK {
   /* ----------------------------- DB helpers ------------------------------ */
 
   private async getMetadataFromId(productId: string): Promise<string> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     const product = await this.prisma.productDPP.findUnique({
       where: { id: productId },
     });
@@ -490,6 +563,9 @@ export class SafeoutSDK {
   private async getMetadataFromIdArray(
     productIdArray: string[]
   ): Promise<object[]> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     const products = await this.prisma.productDPP.findMany({
       where: { id: { in: productIdArray } },
       select: { info: true },
@@ -543,6 +619,9 @@ export class SafeoutSDK {
   }
 
   private async getSignatureFromId(productId: string): Promise<string | null> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     const product = await this.prisma.productDPP.findUnique({
       where: { id: productId },
       select: { signature: true },
@@ -555,6 +634,9 @@ export class SafeoutSDK {
     productId: string,
     signature: string
   ): Promise<void> {
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
     const product = await this.prisma.productDPP.findUnique({
       where: { id: productId },
     });
