@@ -15,6 +15,7 @@ import {
   sendAndConfirmTransaction,
   Signer,
   TransactionInstruction,
+  EpochSchedule,
 } from "@solana/web3.js";
 import { createHash } from "crypto";
 import { createMemoInstruction, MEMO_PROGRAM_ID } from "@solana/spl-memo";
@@ -51,17 +52,33 @@ const signatureString = z
 /** Runtime‑validated shape of a memo object stored on‑chain */
 const SignatureSchema = z.object({
   hash: z.string().min(1, "Hash is required"),
-  updatedAt: isoDateString,
-  lastUpdate: z.array(signatureString).optional(),
 });
 
-export type ProductInput = { productUid: string; info: object };
+export type ProductInput = {  productUid: string;
+  info: {
+    [key: string]: string;
+  };
+};
 
 export interface MintResult {
   productUid: string;
   signature: string;
   hash: string;
 }
+
+type FieldHistory = {
+  value: string;
+  date: string;
+};
+
+type VersionedProduct = {
+  productUid: string;
+  info: {
+    [key: string]: FieldHistory[];
+  };
+  dateReference: {key: string; value: string}[];
+};
+
 
 /* -------------------------------------------------------------------------- */
 /*                                Safeout SDK                                 */
@@ -84,7 +101,7 @@ export class SafeoutSDK {
     owner: PublicKey,
     databaseUrl: string
   ) {
-    
+
     this.mintAuthority = mintAuthority;
     this.hashAlgo = hashAlgo;
     this.owner = owner;
@@ -106,7 +123,7 @@ export class SafeoutSDK {
   /*                           Initialization Prisma                         */
   /* ----------------------------------------------------------------------- */
   private async setupPrisma(databaseUrl: string): Promise<PrismaClient> {
-    const tempDir = mkdtempSync(join(tmpdir(), 'safeout-prisma-'));
+    const tempDir = mkdtempSync('prisma');
     const schemaPath = join(tempDir, 'schema.prisma');
 
     const schema = `
@@ -122,6 +139,7 @@ export class SafeoutSDK {
     model ProductDPP {
       id        String   @id
       info      Json
+      dateReference Json
       signature String?
     }
   `;
@@ -149,6 +167,57 @@ export class SafeoutSDK {
   }
 
   /* ----------------------------------------------------------------------- */
+  /*                             Formating product                           */
+  /* ----------------------------------------------------------------------- */
+
+  private isVersionedProductInfo(info: any): info is VersionedProduct['info'] {
+    if (!info || typeof info !== 'object') return false;
+    
+    for (const [key, value] of Object.entries(info)) {
+      if (!Array.isArray(value)) return false;
+      
+      for (const item of value) {
+        if (!item || typeof item !== 'object' || 
+            typeof item.value !== 'string' || 
+            typeof item.date !== 'string') {
+          return false;
+        }
+      }
+    }
+    
+    return true;
+  }
+
+  private safeConvertToVersionedProduct(productId: string, dbInfo: any, dateReference: any): VersionedProduct {
+    if (this.isVersionedProductInfo(dbInfo)) {
+      return {
+        productUid: productId,
+        info: dbInfo,
+        dateReference: dateReference
+      };
+    }
+    if (dbInfo && typeof dbInfo === 'object' && !Array.isArray(dbInfo)) {
+      const date = "date " + dateReference.length;
+      const versionedInfo: VersionedProduct['info'] = {};
+      
+      for (const [key, value] of Object.entries(dbInfo)) {
+        if (typeof value === 'string') {
+          versionedInfo[key] = [{ value, date }];
+        }
+      }
+      
+      return {
+        productUid: productId,
+        info: versionedInfo,
+        dateReference: dateReference
+      };
+    }
+    
+    // If we can't convert, throw an error
+    throw new Error(`Cannot convert product ${productId} info to versioned format`);
+  }
+
+  /* ----------------------------------------------------------------------- */
   /*                             Product creation                            */
   /* ----------------------------------------------------------------------- */
 
@@ -171,20 +240,21 @@ export class SafeoutSDK {
         `Product with ID ${productInput.productUid} already exists.`
       );
     }
-
+    const product = this.formatToVersionedProduct(productInput);
     await this.prisma.productDPP.create({
       data: {
-        id: productInput.productUid,
-        info: productInput.info,
+        id: product.productUid,
+        info: product.info,
         signature: "", // filled right after minting
+        dateReference: product.dateReference
       },
     });
 
     const { signature, hash } = await this.createMintToken(
-      productInput.productUid
+      product.productUid
     );
 
-    return { productUid: productInput.productUid, signature, hash };
+    return { productUid: product.productUid, signature, hash };
   }
 
   /**
@@ -212,11 +282,15 @@ export class SafeoutSDK {
     const toInsert = products.filter((p) => !existingIds.has(p.productUid));
     if (toInsert.length === 0) throw new Error("Every product already exists.");
 
+    // Format products to versioned format before storing
+    const formattedProducts = toInsert.map((p) => this.formatToVersionedProduct(p));
+
     await this.prisma.productDPP.createMany({
-      data: toInsert.map((p) => ({
+      data: formattedProducts.map((p) => ({
         id: p.productUid,
         info: p.info,
         signature: "",
+        dateReference: p.dateReference
       })),
     });
 
@@ -251,10 +325,35 @@ export class SafeoutSDK {
     if (!this.prisma) {
       this.prisma = await this.setupPrisma(this.databaseUrl);
     }
+    
+    // Get existing product
+    const existingProduct = await this.prisma.productDPP.findUnique({
+      where: { id: product.productUid },
+    });
+    
+    if (!existingProduct) {
+      throw new Error(`Product with ID ${product.productUid} not found.`);
+    }
+
+    // Convert existing product to versioned format
+    const currentVersioned = this.safeConvertToVersionedProduct(
+      existingProduct.id, 
+      existingProduct.info,
+      existingProduct.dateReference
+    );
+
+    // Check if current and incoming data are equal
+    if (this.areProductInfosEqual(currentVersioned, product)) {
+      throw new Error(`Product ${product.productUid} has no changes - current and incoming data are identical`);
+    }
+
+    // Update with new data using versioned logic
+    const updatedProduct = this.updateVersionedProduct(currentVersioned, product);
+
     // 1️⃣ Update metadata in the database
     await this.prisma.productDPP.update({
       where: { id: product.productUid },
-      data: { info: product.info },
+      data: { info: updatedProduct.info },
     });
 
     // 2️⃣ Refresh on‑chain representation
@@ -297,24 +396,54 @@ export class SafeoutSDK {
     const toUpdate = products.filter((p) => existingIds.has(p.productUid));
 
     if (toCreate.length) {
+      // Format new products to versioned format
+      const formattedNewProducts = toCreate.map((p) => this.formatToVersionedProduct(p));
+      
       await this.prisma.productDPP.createMany({
-        data: toCreate.map((p) => ({
+        data: formattedNewProducts.map((p) => ({
           id: p.productUid,
           info: p.info,
           signature: "",
+          dateReference: p.dateReference || [{ key: "date 0", value: new Date().toISOString() }],
         })),
       });
     }
 
     if (toUpdate.length) {
-      await this.prisma.$transaction(
-        toUpdate.map((p) =>
-          this.prisma!.productDPP.update({
-            where: { id: p.productUid },
-            data: { info: p.info },
-          })
-        )
-      );
+      // Get existing products and update them with versioned logic
+      const existingProducts = await this.prisma.productDPP.findMany({
+        where: { id: { in: toUpdate.map(p => p.productUid) } },
+      });
+
+      const updateOperations = toUpdate.map((incomingProduct) => {
+        const existingProduct = existingProducts.find(ep => ep.id === incomingProduct.productUid);
+        if (!existingProduct) {
+          throw new Error(`Product ${incomingProduct.productUid} not found`);
+        }
+
+        // Convert existing product to versioned format
+        const currentVersioned = this.safeConvertToVersionedProduct(
+          existingProduct.id,
+          existingProduct.info,
+          existingProduct.dateReference
+        );
+
+        // Check if current and incoming data are equal
+        if (this.areProductInfosEqual(currentVersioned, incomingProduct) && !existingProduct.signature) {
+          console.error(`Product ${incomingProduct.productUid} has no changes - current and incoming data are identical`);
+          return null;
+        }
+
+        // Update with new data
+        const updatedProduct = this.updateVersionedProduct(currentVersioned, incomingProduct);
+
+        return this.prisma!.productDPP.update({
+          where: { id: incomingProduct.productUid },
+          data: { info: updatedProduct.info , dateReference: updatedProduct.dateReference },
+        });
+      }).filter((op): op is ReturnType<PrismaClient['productDPP']['update']> => op !== null);
+
+      await this.prisma.$transaction(updateOperations);
     }
 
     const minted = await this.batchMintToken(
@@ -359,8 +488,6 @@ export class SafeoutSDK {
     const ataInstruction = await this.createInstruction(payer);
     const memoPayload = JSON.stringify({
       hash: hashData,
-      updatedAt: new Date().toISOString(),
-      lastUpdate: [],
     });
 
     try {
@@ -400,15 +527,11 @@ export class SafeoutSDK {
       throw new Error("Metadata has not changed; no update needed.");
 
     memoData.hash = newHash;
-    memoData.updatedAt = new Date().toISOString();
-    memoData.lastUpdate = [...(memoData.lastUpdate ?? []), currentSignature];
 
     const payer = await this.getPayer();
     const ataInstruction = await this.createInstruction(payer);
     const memoPayload = JSON.stringify({
       hash: memoData.hash,
-      updatedAt: memoData.updatedAt,
-      lastUpdate: memoData.lastUpdate,
     });
 
     try {
@@ -438,8 +561,9 @@ export class SafeoutSDK {
     concurrency = 10
   ): Promise<MintResult[]> {
     const metadataArray = await this.getMetadataFromIdArray(productIds);
-    if (!this.mint) this.mint = await this.initializeMint();
-
+    if (!this.mint) {
+      this.mint = await this.initializeMint();
+    }
     const limiter = new Bottleneck({
       maxConcurrent: concurrency,
       minTime: 100,
@@ -661,5 +785,78 @@ export class SafeoutSDK {
     instruction: ParsedInstruction | PartiallyDecodedInstruction
   ): instruction is ParsedInstruction {
     return (instruction as ParsedInstruction).parsed !== undefined;
+  }
+
+  private formatToVersionedProduct(data: ProductInput): VersionedProduct {
+    const date ="date 0";
+    const formattedInfo: VersionedProduct["info"] = {};
+
+    for (const [key, value] of Object.entries(data.info)) {
+      formattedInfo[key] = [{ value, date }];
+    }
+
+    return {
+      productUid: data.productUid,
+      info: formattedInfo,
+      dateReference: [{ key: "date 0", value: new Date().toISOString() }],
+    };
+  }
+
+  private updateVersionedProduct(
+    current: VersionedProduct,
+    incoming: ProductInput
+  ): VersionedProduct {
+    const date = "date " + (current.dateReference.length + 1);
+    const updatedInfo: VersionedProduct["info"] = { ...current.info };
+    current.dateReference.push({ key: date, value: new Date().toISOString()});
+    for (const [key, newValue] of Object.entries(incoming.info)) {
+      if (!updatedInfo[key]) {
+        updatedInfo[key] = [{ value: newValue, date }];
+        continue;
+      }
+
+      const history = updatedInfo[key];
+      const lastEntry = history[history.length - 1];
+
+      if (lastEntry.value !== newValue) {
+        history.push({ value: newValue, date });
+      }
+    }
+
+    return {
+      productUid: current.productUid,
+      info: updatedInfo,
+      dateReference: current.dateReference,
+    };
+  }
+
+  private areProductInfosEqual(currentVersioned: VersionedProduct, incomingProduct: ProductInput): boolean {
+    // Get the latest values from the current versioned product
+    const currentLatestValues: { [key: string]: string } = {};
+    
+    for (const [key, history] of Object.entries(currentVersioned.info)) {
+      if (history.length > 0) {
+        const latestEntry = history[history.length - 1];
+        currentLatestValues[key] = latestEntry.value;
+      }
+    }
+
+    // Compare with incoming product info
+    const currentKeys = Object.keys(currentLatestValues);
+    const incomingKeys = Object.keys(incomingProduct.info);
+
+    // Check if they have the same number of keys
+    if (currentKeys.length !== incomingKeys.length) {
+      return false;
+    }
+
+    // Check if all keys and values match
+    for (const key of incomingKeys) {
+      if (currentLatestValues[key] !== incomingProduct.info[key]) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

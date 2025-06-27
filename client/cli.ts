@@ -1,6 +1,6 @@
 import readline from "node:readline";
 import { PublicKey } from "@solana/web3.js";
-import { SafeoutSDK } from "./class_safeout";
+import { ProductInput, SafeoutSDK } from "./class_safeout";
 
 /* -------------------------------------------------------------------------- */
 /*  Instance SDK (adapté à ton réseau + clés)                                 */
@@ -9,7 +9,8 @@ const sdk = new SafeoutSDK(
   "Testnet",
   "sha256",
   new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1"),
-  new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ")
+  new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
+  "postgresql://safeout:pide@localhost:4242/sdk-1?schema=public"
 );
 
 /* -------------------------------------------------------------------------- */
@@ -24,20 +25,17 @@ const ask = (q: string) => new Promise<string>((res) => rl.question(q, res));
 /* -------------------------------------------------------------------------- */
 /*  Démo produits                                                             */
 /* -------------------------------------------------------------------------- */
-const demoProducts = [
+const demoProducts: ProductInput[] = [
   { productUid: "demo-001", info: { name: "T-Shirt Safeout", color: "black" } },
-  { productUid: "demo-002", info: { name: "Sneakers Safeout", size: 42 } },
-  {
-    productUid: "demo-003",
-    info: { name: "Backpack Safeout", capacity: "20 L" },
-  },
+  { productUid: "demo-002", info: { name: "Sneakers Safeout", size: "42" } },
+  { productUid: "demo-003", info: { name: "Backpack Safeout", capacity: "20 L" } },
 ];
 
 /* -------------------------------------------------------------------------- */
 /*  Boucle principale                                                         */
 /* -------------------------------------------------------------------------- */
 async function mainLoop() {
-  for (;;) {
+  for (; ;) {
     console.log(
       "\nActions : create | update | check | batch-create | batch-update | exit"
     );
@@ -56,12 +54,12 @@ async function mainLoop() {
           const id = await ask("Product UID : ");
           const json = await ask("New metadata (JSON) : ");
           const info = JSON.parse(json);
-          console.log(await sdk.updateDppProduct(id, info));
+          console.log(await sdk.updateDppProduct({ productUid: id, info }));
           break;
         }
         case "check": {
           const id = await ask("Product UID : ");
-          console.log(await sdk.CheckAuthenticityOnBlockchain(id));
+          console.log(await sdk.checkAuthenticityOnBlockchain(id));
           break;
         }
         case "batch-create": {
@@ -73,8 +71,6 @@ async function mainLoop() {
             productUid: p.productUid,
             info: {
               ...p.info,
-              batchRun: i + 1,
-              updatedAt: new Date().toISOString(),
             },
           }));
           console.log(await sdk.updateBatchDppProducts(updated));
