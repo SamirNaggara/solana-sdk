@@ -1,17 +1,23 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-async function main() {
-  const deleted = await prisma.productDPP.deleteMany();
-  console.log(`🗑️ Supprimé ${deleted.count} produits`);
+async function clearDatabase() {
+  try {
+    // Supprimer les dépendances d'abord (relations enfants → parents)
+    await prisma.dppProductHistory.deleteMany();     // dépend de productDPP
+    await prisma.hazardousSubstance.deleteMany();    // dépend de productDPP
+    await prisma.materialComposition.deleteMany();   // dépend de productDPP
+
+    await prisma.productDPP.deleteMany();            // dépend de Manufacturer
+    await prisma.manufacturer.deleteMany();          // peut être supprimé ensuite
+
+    console.log('✅ Toutes les données Prisma ont été supprimées avec succès.');
+  } catch (error) {
+    console.error('❌ Une erreur est survenue :', error);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
-main()
-  .catch((e) => {
-    console.error("💥 Erreur :", e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+clearDatabase();

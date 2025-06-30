@@ -23,11 +23,12 @@ import { getPayerKeypair } from "./lib/solanaUtils";
 import z from "zod";
 import { PrismaClient } from "@prisma/client";
 import Bottleneck from "bottleneck";
-import { GetIDProductDPP } from "./GetIdProuctDPP";
 import { execSync } from 'child_process';
 import { writeFileSync, mkdtempSync } from 'fs';
-import { tmpdir } from 'os';
 import { join } from 'path';
+import DppProductSchema from "./SchemaZod";
+
+
 
 /** Supported Solana cluster names */
 export type NetworkValue = "Mainnet" | "Testnet" | "Devnet";
@@ -36,28 +37,43 @@ export type NetworkValue = "Mainnet" | "Testnet" | "Devnet";
 /*                                Helper types                                */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Runtime‑validated shape of a product metadata object.
- * This is a placeholder and should be replaced with actual metadata schema.
- * The metadata can be anything, but it must be a valid JSON object.
- */
-const isoDateString = z.string().refine((val) => !isNaN(Date.parse(val)), {
-  message: "Must be a valid ISO‑8601 string",
-});
 
-const signatureString = z
-  .string()
-  .min(1, "Signature must be a non‑empty string");
 
 /** Runtime‑validated shape of a memo object stored on‑chain */
 const SignatureSchema = z.object({
   hash: z.string().min(1, "Hash is required"),
 });
 
-export type ProductInput = {  productUid: string;
-  info: {
-    [key: string]: string;
+export type ProductInput = {
+  productUid: string;
+  info: z.infer<typeof DppProductSchema>;
+};
+
+// Type for the complete product with relations
+export type CompleteProduct = {
+  id: string;
+  productName: string;
+  dateOfManufacture: Date;
+  placeOfManufacture: string;
+  productCategory: string;
+  repairabilityScore?: number;
+  endOfLifeInstructions: string;
+  digitalLink: string;
+  signature: string;
+  manufacturer: {
+    name: string;
+    address: string;
+    contactEmail: string;
   };
+  materialComposition: Array<{
+    material: string;
+    percentage: number;
+  }>;
+  hazardousSubstances: Array<{
+    substance: string;
+    casNumber: string;
+    concentration: number;
+  }>;
 };
 
 export interface MintResult {
@@ -66,18 +82,7 @@ export interface MintResult {
   hash: string;
 }
 
-type FieldHistory = {
-  value: string;
-  date: string;
-};
 
-type VersionedProduct = {
-  productUid: string;
-  info: {
-    [key: string]: FieldHistory[];
-  };
-  dateReference: {key: string; value: string}[];
-};
 
 
 /* -------------------------------------------------------------------------- */
@@ -93,6 +98,24 @@ export class SafeoutSDK {
   private prisma: PrismaClient | null;
   private databaseUrl: string;
   private mint: PublicKey | null;
+
+  /* ---------------------------- Validation helpers ------------------------ */
+
+  /**
+   * Validates product data using Zod schema
+   * @param productData - The product data to validate
+   * @throws ZodError if validation fails
+   */
+  private validateProductData(productData: any): z.infer<typeof DppProductSchema> {
+    try {
+      return DppProductSchema.parse(productData);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        throw error; // Re-throw Zod error to preserve detailed validation messages
+      }
+      throw new Error(`Validation failed: ${error}`);
+    }
+  }
 
   constructor(
     network: NetworkValue,
@@ -132,8 +155,7 @@ export class SafeoutSDK {
   /*                           Initialization Prisma                         */
   /* ----------------------------------------------------------------------- */
   private async setupPrisma(databaseUrl: string): Promise<PrismaClient> {
-    const tempDir = mkdtempSync('prisma');
-    const schemaPath = join(tempDir, 'schema.prisma');
+    const schemaPath = join("prisma/", 'schema.prisma');
 
     const schema = `
     datasource db {
@@ -141,15 +163,80 @@ export class SafeoutSDK {
       url      = "${databaseUrl}"
     }
 
+ 
     generator client {
       provider = "prisma-client-js"
     }
 
-    model ProductDPP {
-      id        String   @id
-      info      Json
-      dateReference Json
-      signature String?
+    model productDPP {
+      id                    String              @id @default(uuid()) @map("productId")
+      productName           String
+      dateOfManufacture     DateTime
+      placeOfManufacture    String
+      productCategory       String
+      repairabilityScore    Float?              // Optional
+      endOfLifeInstructions String
+      digitalLink           String
+
+      manufacturer          Manufacturer        @relation(fields: [manufacturerId], references: [id])
+      manufacturerId        String
+
+      materialComposition   MaterialComposition[]
+      hazardousSubstances   HazardousSubstance[]
+      signature             String
+      history               DppProductHistory[]
+
+      @@map("dpp_products")
+    }
+    model Manufacturer {
+      id           String       @id @default(uuid())
+      name         String
+      address      String
+      contactEmail String
+
+      products     productDPP[]
+
+      @@map("manufacturers")
+    }
+
+    model MaterialComposition {
+      id          String      @id @default(uuid())
+      material    String
+      percentage  Float
+
+      product     productDPP  @relation(fields: [productId], references: [id])
+      productId   String
+
+      @@map("material_compositions")
+    }
+
+    model HazardousSubstance {
+      id            String      @id @default(uuid())
+      substance     String
+      casNumber     String
+      concentration Float
+
+      product       productDPP  @relation(fields: [productId], references: [id])
+      productId     String
+
+      @@map("hazardous_substances")
+    }
+
+    model DppProductHistory {
+      id                    String      @id @default(uuid())
+      productId             String
+      action                String      // CREATE, UPDATE, DELETE
+      changedBy             String      // User identifier
+      changeTimestamp       DateTime    @default(now())
+      previousData          Json?       // Previous state of the product
+      newData               Json?       // New state of the product
+      changeDescription     String?     // Optional description of the change
+
+      product               productDPP  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+      @@map("dpp_product_history")
+      @@index([productId])
+      @@index([changeTimestamp])
     }
   `;
 
@@ -176,54 +263,107 @@ export class SafeoutSDK {
   }
 
   /* ----------------------------------------------------------------------- */
-  /*                             Formating product                           */
+  /*                             Helper functions                            */
   /* ----------------------------------------------------------------------- */
 
-  private isVersionedProductInfo(info: any): info is VersionedProduct['info'] {
-    if (!info || typeof info !== 'object') return false;
-    
-    for (const [key, value] of Object.entries(info)) {
-      if (!Array.isArray(value)) return false;
-      
-      for (const item of value) {
-        if (!item || typeof item !== 'object' || 
-            typeof item.value !== 'string' || 
-            typeof item.date !== 'string') {
-          return false;
-        }
-      }
+  /**
+   * Create or find a manufacturer in the database
+   */
+  private async createOrFindManufacturer(manufacturerData: {
+    name: string;
+    address: string;
+    contactEmail: string;
+  }): Promise<string> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
-    
-    return true;
+
+    // Try to find existing manufacturer
+    const existingManufacturer = await this.prisma.manufacturer.findFirst({
+      where: {
+        name: manufacturerData.name,
+        contactEmail: manufacturerData.contactEmail
+      }
+    });
+
+    if (existingManufacturer) {
+      return existingManufacturer.id;
+    }
+
+    // Create new manufacturer
+    const newManufacturer = await this.prisma.manufacturer.create({
+      data: manufacturerData
+    });
+
+    return newManufacturer.id;
   }
 
-  private safeConvertToVersionedProduct(productId: string, dbInfo: any, dateReference: any): VersionedProduct {
-    if (this.isVersionedProductInfo(dbInfo)) {
-      return {
-        productUid: productId,
-        info: dbInfo,
-        dateReference: dateReference
-      };
-    }
-    if (dbInfo && typeof dbInfo === 'object' && !Array.isArray(dbInfo)) {
-      const date = "date " + dateReference.length;
-      const versionedInfo: VersionedProduct['info'] = {};
-      
-      for (const [key, value] of Object.entries(dbInfo)) {
-        if (typeof value === 'string') {
-          versionedInfo[key] = [{ value, date }];
-        }
+  /**
+   * Convert ProductInput to Prisma create data
+   */
+  private async convertToCreateData(productInput: ProductInput) {
+    const manufacturerId = await this.createOrFindManufacturer(productInput.info.manufacturer);
+
+    return {
+      id: productInput.productUid,
+      productName: productInput.info.productName,
+      dateOfManufacture: new Date(productInput.info.dateOfManufacture),
+      placeOfManufacture: productInput.info.placeOfManufacture,
+      productCategory: productInput.info.productCategory,
+      repairabilityScore: productInput.info.repairabilityScore,
+      endOfLifeInstructions: productInput.info.endOfLifeInstructions,
+      digitalLink: productInput.info.digitalLink,
+      manufacturerId: manufacturerId,
+      signature: "",
+      materialComposition: {
+        create: productInput.info.materialComposition.map(mc => ({
+          material: mc.material,
+          percentage: mc.percentage
+        }))
+      },
+      hazardousSubstances: {
+        create: productInput.info.hazardousSubstances.map(hs => ({
+          substance: hs.substance,
+          casNumber: hs.casNumber,
+          concentration: hs.concentration
+        }))
       }
-      
-      return {
-        productUid: productId,
-        info: versionedInfo,
-        dateReference: dateReference
-      };
+    };
+  }
+
+  /**
+   * Get the full product data for history recording
+   */
+  private async getFullProductData(productId: string): Promise<any | null> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
-    
-    // If we can't convert, throw an error
-    throw new Error(`Cannot convert product ${productId} info to versioned format`);
+
+    const product = await this.prisma.productDPP.findUnique({
+      where: { id: productId },
+      include: {
+        manufacturer: true,
+        materialComposition: true,
+        hazardousSubstances: true,
+      },
+    });
+
+    if (!product) return null;
+
+    return {
+      id: product.id,
+      productName: product.productName,
+      dateOfManufacture: product.dateOfManufacture,
+      placeOfManufacture: product.placeOfManufacture,
+      productCategory: product.productCategory,
+      repairabilityScore: product.repairabilityScore,
+      endOfLifeInstructions: product.endOfLifeInstructions,
+      digitalLink: product.digitalLink,
+      signature: product.signature,
+      manufacturer: product.manufacturer,
+      materialComposition: product.materialComposition,
+      hazardousSubstances: product.hazardousSubstances,
+    };
   }
 
   /* ----------------------------------------------------------------------- */
@@ -234,13 +374,19 @@ export class SafeoutSDK {
    * Create a single DPP product and immediately mint its token.
    * @param productInput – `{ productUid, info }` structure.
    * @throws Error if a product with the same UID already exists.
+   * @throws ZodError if product validation fails.
    */
   public async createDppProduct(
-    productInput: ProductInput
+    productInput: ProductInput,
+    changedBy?: string
   ): Promise<MintResult> {
+    // Validate product data using Zod schema
+    this.validateProductData(productInput.info);
+
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
+
     const exists = await this.prisma.productDPP.findUnique({
       where: { id: productInput.productUid },
     });
@@ -249,21 +395,32 @@ export class SafeoutSDK {
         `Product with ID ${productInput.productUid} already exists.`
       );
     }
-    const product = this.formatToVersionedProduct(productInput);
-    await this.prisma.productDPP.create({
-      data: {
-        id: product.productUid,
-        info: product.info,
-        signature: "", // filled right after minting
-        dateReference: product.dateReference
+
+    const createData = await this.convertToCreateData(productInput);
+    const createdProduct = await this.prisma.productDPP.create({
+      data: createData,
+      include: {
+        manufacturer: true,
+        materialComposition: true,
+        hazardousSubstances: true,
       },
     });
 
     const { signature, hash } = await this.createMintToken(
-      product.productUid
+      productInput.productUid
     );
 
-    return { productUid: product.productUid, signature, hash };
+    // Record creation in history
+    await this.recordProductHistory(
+      productInput.productUid,
+      'CREATE',
+      null,
+      createdProduct,
+      changedBy || 'system',
+      'Product created'
+    );
+
+    return { productUid: productInput.productUid, signature, hash };
   }
 
   /**
@@ -271,13 +428,20 @@ export class SafeoutSDK {
    * @param products     Array of `{ productUid, info }` objects.
    * @param concurrency  Maximum parallel mints handled by the rate‑limiter.
    * @throws Error if all given products already exist.
+   * @throws ZodError if any product validation fails.
    */
   public async createBatchDppProducts(
     products: ProductInput[],
-    concurrency = 10
+    concurrency = 10,
+    changedBy?: string
   ): Promise<MintResult[]> {
+    // Validate all products before processing
+    products.forEach(product => {
+      this.validateProductData(product.info);
+    });
+
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
     // Fetch existing IDs in a single query for efficiency
     const ids = products.map((p) => p.productUid);
@@ -291,17 +455,20 @@ export class SafeoutSDK {
     const toInsert = products.filter((p) => !existingIds.has(p.productUid));
     if (toInsert.length === 0) throw new Error("Every product already exists.");
 
-    // Format products to versioned format before storing
-    const formattedProducts = toInsert.map((p) => this.formatToVersionedProduct(p));
-
-    await this.prisma.productDPP.createMany({
-      data: formattedProducts.map((p) => ({
-        id: p.productUid,
-        info: p.info,
-        signature: "",
-        dateReference: p.dateReference
-      })),
-    });
+    // Create products one by one due to complex relations
+    const createdProducts = [];
+    for (const product of toInsert) {
+      const createData = await this.convertToCreateData(product);
+      const createdProduct = await this.prisma.productDPP.create({
+        data: createData,
+        include: {
+          manufacturer: true,
+          materialComposition: true,
+          hazardousSubstances: true,
+        },
+      });
+      createdProducts.push(createdProduct);
+    }
 
     const minted = await this.batchMintToken(
       toInsert.map((p) => p.productUid),
@@ -318,6 +485,20 @@ export class SafeoutSDK {
       )
     );
 
+    // Record batch creation in history
+    await Promise.all(
+      createdProducts.map(product =>
+        this.recordProductHistory(
+          product.id,
+          'CREATE',
+          null,
+          product,
+          changedBy || 'system',
+          'Batch product creation'
+        )
+      )
+    );
+
     return minted;
   }
 
@@ -326,55 +507,85 @@ export class SafeoutSDK {
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Update a single product’s metadata and refresh its on‑chain token.
-   * @param productUid – Unique identifier of the product.
-   * @param info       – New metadata object.
+   * Update a single product's metadata and refresh its on‑chain token.
+   * @param product – Product data with new information.
+   * @throws ZodError if product validation fails.
    */
-  public async updateDppProduct(product: ProductInput): Promise<MintResult> {
+  public async updateDppProduct(product: ProductInput, changedBy?: string): Promise<MintResult> {
+    // Validate product data using Zod schema
+    this.validateProductData(product.info);
+
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
-    
-    // Get existing product
-    const existingProduct = await this.prisma.productDPP.findUnique({
-      where: { id: product.productUid },
-    });
-    
+
+    // Get existing product data for history
+    const existingProduct = await this.getFullProductData(product.productUid);
+
     if (!existingProduct) {
       throw new Error(`Product with ID ${product.productUid} not found.`);
     }
 
-    // Convert existing product to versioned format
-    const currentVersioned = this.safeConvertToVersionedProduct(
-      existingProduct.id, 
-      existingProduct.info,
-      existingProduct.dateReference
+    // Update the product with new data
+    await this.updateProductWithRelations(product);
+
+    // Get updated product data for history
+    const updatedProduct = await this.getFullProductData(product.productUid);
+
+    // Record update in history
+    await this.recordProductHistory(
+      product.productUid,
+      'UPDATE',
+      existingProduct,
+      updatedProduct,
+      changedBy || 'system',
+      'Product updated'
     );
 
-    // Check if current and incoming data are equal
-    if (this.areProductInfosEqual(currentVersioned, product)) {
-      throw new Error(`Product ${product.productUid} has no changes - current and incoming data are identical`);
-    }
-
-    // Update with new data using versioned logic
-    const updatedProduct = this.updateVersionedProduct(currentVersioned, product);
-
-    // 1️⃣ Update metadata in the database
-    await this.prisma.productDPP.update({
-      where: { id: product.productUid },
-      data: { info: updatedProduct.info },
-    });
-
-    // 2️⃣ Refresh on‑chain representation
+    // Refresh on‑chain representation
     const { signature, hash } = await this.updateMintToken(product.productUid);
 
-    // 3️⃣ Persist the new signature in the DB
+    return { productUid: product.productUid, signature, hash };
+  }
+
+  /**
+   * Update product with all its relations
+   */
+  private async updateProductWithRelations(product: ProductInput): Promise<void> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    const manufacturerId = await this.createOrFindManufacturer(product.info.manufacturer);
+
     await this.prisma.productDPP.update({
       where: { id: product.productUid },
-      data: { signature },
+      data: {
+        productName: product.info.productName,
+        dateOfManufacture: new Date(product.info.dateOfManufacture),
+        placeOfManufacture: product.info.placeOfManufacture,
+        productCategory: product.info.productCategory,
+        repairabilityScore: product.info.repairabilityScore,
+        endOfLifeInstructions: product.info.endOfLifeInstructions,
+        digitalLink: product.info.digitalLink,
+        manufacturerId: manufacturerId,
+        materialComposition: {
+          deleteMany: {},
+          create: product.info.materialComposition.map(mc => ({
+            material: mc.material,
+            percentage: mc.percentage
+          }))
+        },
+        hazardousSubstances: {
+          deleteMany: {},
+          create: product.info.hazardousSubstances.map(hs => ({
+            substance: hs.substance,
+            casNumber: hs.casNumber,
+            concentration: hs.concentration
+          }))
+        }
+      },
     });
-
-    return { productUid: product.productUid, signature, hash };
   }
 
   /* ----------------------------------------------------------------------- */
@@ -389,11 +600,18 @@ export class SafeoutSDK {
    */
   public async updateBatchDppProducts(
     products: ProductInput[],
-    concurrency = 10
+    concurrency = 10,
+    changedBy?: string
   ): Promise<MintResult[]> {
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
+
+    // Validate all products before processing
+    products.forEach(product => {
+      this.validateProductData(product.info);
+    });
+
     const ids = products.map((p) => p.productUid);
     const existing = await this.prisma.productDPP.findMany({
       where: { id: { in: ids } },
@@ -404,56 +622,35 @@ export class SafeoutSDK {
     const toCreate = products.filter((p) => !existingIds.has(p.productUid));
     const toUpdate = products.filter((p) => existingIds.has(p.productUid));
 
-    if (toCreate.length) {
-      // Format new products to versioned format
-      const formattedNewProducts = toCreate.map((p) => this.formatToVersionedProduct(p));
-      
-      await this.prisma.productDPP.createMany({
-        data: formattedNewProducts.map((p) => ({
-          id: p.productUid,
-          info: p.info,
-          signature: "",
-          dateReference: p.dateReference || [{ key: "date 1", value: new Date().toISOString() }],
-        })),
+    // Get existing data for updates before modifying
+    const existingUpdateData = await Promise.all(
+      toUpdate.map(product => this.getFullProductData(product.productUid))
+    );
+
+    // Create new products
+    const createdProducts = [];
+    for (const product of toCreate) {
+      const createData = await this.convertToCreateData(product);
+      const createdProduct = await this.prisma.productDPP.create({
+        data: createData,
+        include: {
+          manufacturer: true,
+          materialComposition: true,
+          hazardousSubstances: true,
+        },
       });
+      createdProducts.push(createdProduct);
     }
 
-    if (toUpdate.length) {
-      // Get existing products and update them with versioned logic
-      const existingProducts = await this.prisma.productDPP.findMany({
-        where: { id: { in: toUpdate.map(p => p.productUid) } },
-      });
-
-      const updateOperations = toUpdate.map((incomingProduct) => {
-        const existingProduct = existingProducts.find(ep => ep.id === incomingProduct.productUid);
-        if (!existingProduct) {
-          throw new Error(`Product ${incomingProduct.productUid} not found`);
-        }
-
-        // Convert existing product to versioned format
-        const currentVersioned = this.safeConvertToVersionedProduct(
-          existingProduct.id,
-          existingProduct.info,
-          existingProduct.dateReference
-        );
-
-        // Check if current and incoming data are equal
-        if (this.areProductInfosEqual(currentVersioned, incomingProduct) && existingProduct.signature) {
-          console.error(`Product ${incomingProduct.productUid} has no changes - current and incoming data are identical`);
-          return null;
-        }
-
-        // Update with new data
-        const updatedProduct = this.updateVersionedProduct(currentVersioned, incomingProduct);
-
-        return this.prisma!.productDPP.update({
-          where: { id: incomingProduct.productUid },
-          data: { info: updatedProduct.info , dateReference: updatedProduct.dateReference },
-        });
-      }).filter((op): op is ReturnType<PrismaClient['productDPP']['update']> => op !== null);
-
-      await this.prisma.$transaction(updateOperations);
+    // Update existing products
+    for (const product of toUpdate) {
+      await this.updateProductWithRelations(product);
     }
+
+    // Get updated data for history
+    const updatedProductData = await Promise.all(
+      toUpdate.map(product => this.getFullProductData(product.productUid))
+    );
 
     const minted = await this.batchMintToken(
       products.map((p) => p.productUid),
@@ -469,7 +666,133 @@ export class SafeoutSDK {
       )
     );
 
+    // Record batch operations in history
+    // Record creations
+    await Promise.all(
+      createdProducts.map(product =>
+        this.recordProductHistory(
+          product.id,
+          'CREATE',
+          null,
+          product,
+          changedBy || 'system',
+          'Batch product creation (upsert)'
+        )
+      )
+    );
+
+    // Record updates
+    await Promise.all(
+      toUpdate.map((product, index) =>
+        this.recordProductHistory(
+          product.productUid,
+          'UPDATE',
+          existingUpdateData[index],
+          updatedProductData[index],
+          changedBy || 'system',
+          'Batch product update (upsert)'
+        )
+      )
+    );
+
     return minted;
+  }
+
+  /* ----------------------------------------------------------------------- */
+  /*                          Product deletion                               */
+  /* ----------------------------------------------------------------------- */
+
+  /**
+   * Delete a single product and record the deletion in history.
+   * @param productId - The ID of the product to delete
+   * @param changedBy - The user who initiated the deletion
+   * @throws Error if product not found
+   */
+  public async deleteDppProduct(productId: string, changedBy?: string): Promise<void> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    // Get existing product data for history
+    const existingProduct = await this.getFullProductData(productId);
+
+    if (!existingProduct) {
+      throw new Error(`Product with ID ${productId} not found.`);
+    }
+
+    // Record deletion in history before actually deleting
+    await this.recordProductHistory(
+      productId,
+      'DELETE',
+      existingProduct,
+      null,
+      changedBy || 'system',
+      'Product deleted'
+    );
+
+    // Delete the product and all related data
+    await this.prisma.$transaction([
+      this.prisma.materialComposition.deleteMany({
+        where: { productId },
+      }),
+      this.prisma.hazardousSubstance.deleteMany({
+        where: { productId },
+      }),
+      this.prisma.productDPP.delete({
+        where: { id: productId },
+      }),
+    ]);
+  }
+
+  /**
+   * Delete multiple products in batch and record each deletion in history.
+   * @param productIds - Array of product IDs to delete
+   * @param changedBy - The user who initiated the deletion
+   */
+  public async deleteBatchDppProducts(productIds: string[], changedBy?: string): Promise<void> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    // Get existing products data for history
+    const existingProducts = await Promise.all(
+      productIds.map(id => this.getFullProductData(id))
+    );
+
+    // Filter out non-existent products
+    const validProducts = existingProducts.filter((p: any) => p !== null);
+    const validProductIds = validProducts.map((p: any) => p.id);
+
+    if (validProductIds.length === 0) {
+      throw new Error("No valid products found to delete.");
+    }
+
+    // Record deletions in history before actually deleting
+    await Promise.all(
+      validProducts.map((product: any) =>
+        this.recordProductHistory(
+          product.id,
+          'DELETE',
+          product,
+          null,
+          changedBy || 'system',
+          'Batch product deletion'
+        )
+      )
+    );
+
+    // Delete all products and related data in a transaction
+    await this.prisma.$transaction([
+      this.prisma.materialComposition.deleteMany({
+        where: { productId: { in: validProductIds } },
+      }),
+      this.prisma.hazardousSubstance.deleteMany({
+        where: { productId: { in: validProductIds } },
+      }),
+      this.prisma.productDPP.deleteMany({
+        where: { id: { in: validProductIds } },
+      }),
+    ]);
   }
 
   /* ----------------------------------------------------------------------- */
@@ -684,32 +1007,88 @@ export class SafeoutSDK {
 
   private async getMetadataFromId(productId: string): Promise<string> {
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
     const product = await this.prisma.productDPP.findUnique({
       where: { id: productId },
+      include: {
+        manufacturer: true,
+        materialComposition: true,
+        hazardousSubstances: true,
+      },
     });
     if (!product) throw new Error(`Product with ID ${productId} not found.`);
-    return JSON.stringify(product.info);
+
+    // Convert Prisma data to the format expected by the schema
+    const productData = {
+      productId: product.id,
+      productName: product.productName,
+      manufacturer: {
+        name: product.manufacturer.name,
+        address: product.manufacturer.address,
+        contactEmail: product.manufacturer.contactEmail,
+      },
+      dateOfManufacture: product.dateOfManufacture.toISOString().split('T')[0],
+      placeOfManufacture: product.placeOfManufacture,
+      productCategory: product.productCategory,
+      materialComposition: product.materialComposition.map(mc => ({
+        material: mc.material,
+        percentage: mc.percentage,
+      })),
+      hazardousSubstances: product.hazardousSubstances.map(hs => ({
+        substance: hs.substance,
+        casNumber: hs.casNumber,
+        concentration: hs.concentration,
+      })),
+      repairabilityScore: product.repairabilityScore,
+      endOfLifeInstructions: product.endOfLifeInstructions,
+      digitalLink: product.digitalLink,
+    };
+
+    return JSON.stringify(productData);
   }
 
   private async getMetadataFromIdArray(
     productIdArray: string[]
   ): Promise<object[]> {
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
     const products = await this.prisma.productDPP.findMany({
       where: { id: { in: productIdArray } },
-      select: { info: true },
+      include: {
+        manufacturer: true,
+        materialComposition: true,
+        hazardousSubstances: true,
+      },
     });
     if (!products.length)
       throw new Error("No products found for the provided IDs.");
-    return products
-      .map((p) => p.info)
-      .filter(
-        (info): info is object => info !== null && typeof info === "object"
-      );
+
+    return products.map(product => ({
+      productId: product.id,
+      productName: product.productName,
+      manufacturer: {
+        name: product.manufacturer.name,
+        address: product.manufacturer.address,
+        contactEmail: product.manufacturer.contactEmail,
+      },
+      dateOfManufacture: product.dateOfManufacture.toISOString().split('T')[0],
+      placeOfManufacture: product.placeOfManufacture,
+      productCategory: product.productCategory,
+      materialComposition: product.materialComposition.map(mc => ({
+        material: mc.material,
+        percentage: mc.percentage,
+      })),
+      hazardousSubstances: product.hazardousSubstances.map(hs => ({
+        substance: hs.substance,
+        casNumber: hs.casNumber,
+        concentration: hs.concentration,
+      })),
+      repairabilityScore: product.repairabilityScore,
+      endOfLifeInstructions: product.endOfLifeInstructions,
+      digitalLink: product.digitalLink,
+    }));
   }
 
   private async getMemoFromSignature(productId: string): Promise<string> {
@@ -753,7 +1132,7 @@ export class SafeoutSDK {
 
   private async getSignatureFromId(productId: string): Promise<string | null> {
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
     const product = await this.prisma.productDPP.findUnique({
       where: { id: productId },
@@ -768,7 +1147,7 @@ export class SafeoutSDK {
     signature: string
   ): Promise<void> {
     if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
     const product = await this.prisma.productDPP.findUnique({
       where: { id: productId },
@@ -794,76 +1173,229 @@ export class SafeoutSDK {
     return (instruction as ParsedInstruction).parsed !== undefined;
   }
 
-  private formatToVersionedProduct(data: ProductInput): VersionedProduct {
-    const date ="date 1";
-    const formattedInfo: VersionedProduct["info"] = {};
-
-    for (const [key, value] of Object.entries(data.info)) {
-      formattedInfo[key] = [{ value, date }];
+  /**
+   * Record a change in the product history
+   */
+  private async recordProductHistory(
+    productId: string,
+    action: 'CREATE' | 'UPDATE' | 'DELETE',
+    previousData: any = null,
+    newData: any = null,
+    changedBy: string = 'system',
+    changeDescription?: string
+  ): Promise<void> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
 
+    await this.prisma.dppProductHistory.create({
+      data: {
+        productId,
+        action,
+        previousData: previousData ? JSON.parse(JSON.stringify(previousData)) : null,
+        newData: newData ? JSON.parse(JSON.stringify(newData)) : null,
+        changedBy,
+        changeDescription,
+      },
+    });
+  }
+
+  /**
+   * Get the history of changes for a product
+   */
+  public async getProductHistory(productId: string): Promise<any[]> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    const history = await this.prisma.dppProductHistory.findMany({
+      where: { productId },
+      orderBy: { changeTimestamp: 'desc' },
+    });
+
+    return history;
+  }
+
+  /**
+   * Get the complete history of all products with pagination
+   */
+  public async getAllProductHistory(
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    const offset = (page - 1) * limit;
+
+    const [history, total] = await Promise.all([
+      this.prisma.dppProductHistory.findMany({
+        orderBy: { changeTimestamp: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.dppProductHistory.count(),
+    ]);
+
     return {
-      productUid: data.productUid,
-      info: formattedInfo,
-      dateReference: [{ key: "date 1", value: new Date().toISOString() }],
+      history,
+      total,
+      totalPages: Math.ceil(total / limit),
     };
   }
 
-  private updateVersionedProduct(
-    current: VersionedProduct,
-    incoming: ProductInput
-  ): VersionedProduct {
-    const date = "date " + (current.dateReference.length + 1);
-    const updatedInfo: VersionedProduct["info"] = { ...current.info };
-    current.dateReference.push({ key: date, value: new Date().toISOString()});
-    for (const [key, newValue] of Object.entries(incoming.info)) {
-      if (!updatedInfo[key]) {
-        updatedInfo[key] = [{ value: newValue, date }];
-        continue;
-      }
-
-      const history = updatedInfo[key];
-      const lastEntry = history[history.length - 1];
-
-      if (lastEntry.value !== newValue) {
-        history.push({ value: newValue, date });
-      }
+  /**
+   * Get history filtered by action type
+   */
+  public async getProductHistoryByAction(
+    action: 'CREATE' | 'UPDATE' | 'DELETE',
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
 
+    const offset = (page - 1) * limit;
+
+    const [history, total] = await Promise.all([
+      this.prisma.dppProductHistory.findMany({
+        where: { action },
+        orderBy: { changeTimestamp: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.dppProductHistory.count({ where: { action } }),
+    ]);
+
     return {
-      productUid: current.productUid,
-      info: updatedInfo,
-      dateReference: current.dateReference,
+      history,
+      total,
+      totalPages: Math.ceil(total / limit),
     };
   }
 
-  private areProductInfosEqual(currentVersioned: VersionedProduct, incomingProduct: ProductInput): boolean {
-    // Get the latest values from the current versioned product
-    const currentLatestValues: { [key: string]: string } = {};
-
-    for (const [key, history] of Object.entries(currentVersioned.info)) {
-      if (history.length > 0) {
-        const latestEntry = history[history.length - 1];
-        currentLatestValues[key] = latestEntry.value;
-      }
+  /**
+   * Get history filtered by user (changedBy)
+   */
+  public async getProductHistoryByUser(
+    changedBy: string,
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
     }
 
-    // Compare with incoming product info
-    const currentKeys = Object.keys(currentLatestValues);
-    const incomingKeys = Object.keys(incomingProduct.info);
+    const offset = (page - 1) * limit;
 
-    // Check if they have the same number of keys
-    if (currentKeys.length !== incomingKeys.length) {
-      return false;
-    }
+    const [history, total] = await Promise.all([
+      this.prisma.dppProductHistory.findMany({
+        where: { changedBy },
+        orderBy: { changeTimestamp: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.dppProductHistory.count({ where: { changedBy } }),
+    ]);
 
-    // Check if all keys and values match
-    for (const key of incomingKeys) {
-      if (currentLatestValues[key] !== incomingProduct.info[key]) {
-        return false;
-      }
-    }
-
-    return true;
+    return {
+      history,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
   }
+
+  /**
+   * Get history within a date range
+   */
+  public async getProductHistoryByDateRange(
+    startDate: Date,
+    endDate: Date,
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    const offset = (page - 1) * limit;
+
+    const [history, total] = await Promise.all([
+      this.prisma.dppProductHistory.findMany({
+        where: {
+          changeTimestamp: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+        orderBy: { changeTimestamp: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.dppProductHistory.count({
+        where: {
+          changeTimestamp: {
+            gte: startDate,
+            lte: endDate,
+          },
+        },
+      }),
+    ]);
+
+    return {
+      history,
+      total,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Get statistics about product changes
+   */
+  public async getProductHistoryStats(): Promise<{
+    totalChanges: number;
+    createCount: number;
+    updateCount: number;
+    deleteCount: number;
+    uniqueProducts: number;
+    uniqueUsers: number;
+  }> {
+    if (!this.prisma) {
+      throw new Error("Prisma client is not initialized. Call init() first.");
+    }
+
+    const [
+      totalChanges,
+      createCount,
+      updateCount,
+      deleteCount,
+      uniqueProductsResult,
+      uniqueUsersResult,
+    ] = await Promise.all([
+      this.prisma.dppProductHistory.count(),
+      this.prisma.dppProductHistory.count({ where: { action: 'CREATE' } }),
+      this.prisma.dppProductHistory.count({ where: { action: 'UPDATE' } }),
+      this.prisma.dppProductHistory.count({ where: { action: 'DELETE' } }),
+      this.prisma.dppProductHistory.groupBy({
+        by: ['productId'],
+        _count: true,
+      }),
+      this.prisma.dppProductHistory.groupBy({
+        by: ['changedBy'],
+        _count: true,
+      }),
+    ]);
+
+    return {
+      totalChanges,
+      createCount,
+      updateCount,
+      deleteCount,
+      uniqueProducts: uniqueProductsResult.length,
+      uniqueUsers: uniqueUsersResult.length,
+    };
+  }
+
 }
