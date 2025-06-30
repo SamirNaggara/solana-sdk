@@ -12,7 +12,6 @@ const sdk = new SafeoutSDK(
   new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
   "postgresql://safeout:pide@localhost:4242/sdk-1?schema=public"
 );
-
 /* -------------------------------------------------------------------------- */
 /*  Helpers I/O                                                               */
 /* -------------------------------------------------------------------------- */
@@ -35,6 +34,7 @@ const demoProducts: ProductInput[] = [
 /*  Boucle principale                                                         */
 /* -------------------------------------------------------------------------- */
 async function mainLoop() {
+  await sdk.init();
   for (; ;) {
     console.log(
       "\nActions : create | update | check | batch-create | batch-update | exit"

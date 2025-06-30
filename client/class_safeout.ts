@@ -119,6 +119,15 @@ export class SafeoutSDK {
     this.mint = null; // lazy‑initialised on first mint
   }
 
+  public async init(): Promise<void> {
+    // Ensure the Prisma client is set up
+    if (!this.prisma) {
+      this.prisma = await this.setupPrisma(this.databaseUrl);
+    }
+    if (!this.mint) {
+      this.mint = await this.initializeMint();
+    }
+  }
   /* ----------------------------------------------------------------------- */
   /*                           Initialization Prisma                         */
   /* ----------------------------------------------------------------------- */
@@ -404,7 +413,7 @@ export class SafeoutSDK {
           id: p.productUid,
           info: p.info,
           signature: "",
-          dateReference: p.dateReference || [{ key: "date 0", value: new Date().toISOString() }],
+          dateReference: p.dateReference || [{ key: "date 1", value: new Date().toISOString() }],
         })),
       });
     }
@@ -429,7 +438,7 @@ export class SafeoutSDK {
         );
 
         // Check if current and incoming data are equal
-        if (this.areProductInfosEqual(currentVersioned, incomingProduct) && !existingProduct.signature) {
+        if (this.areProductInfosEqual(currentVersioned, incomingProduct) && existingProduct.signature) {
           console.error(`Product ${incomingProduct.productUid} has no changes - current and incoming data are identical`);
           return null;
         }
@@ -765,8 +774,6 @@ export class SafeoutSDK {
       where: { id: productId },
     });
     if (!product) throw new Error(`Product with ID ${productId} not found.`);
-    if (product.signature)
-      throw new Error(`Signature already exists for product ID ${productId}.`);
 
     await this.prisma.productDPP.update({
       where: { id: productId },
@@ -788,7 +795,7 @@ export class SafeoutSDK {
   }
 
   private formatToVersionedProduct(data: ProductInput): VersionedProduct {
-    const date ="date 0";
+    const date ="date 1";
     const formattedInfo: VersionedProduct["info"] = {};
 
     for (const [key, value] of Object.entries(data.info)) {
@@ -798,7 +805,7 @@ export class SafeoutSDK {
     return {
       productUid: data.productUid,
       info: formattedInfo,
-      dateReference: [{ key: "date 0", value: new Date().toISOString() }],
+      dateReference: [{ key: "date 1", value: new Date().toISOString() }],
     };
   }
 
@@ -833,7 +840,7 @@ export class SafeoutSDK {
   private areProductInfosEqual(currentVersioned: VersionedProduct, incomingProduct: ProductInput): boolean {
     // Get the latest values from the current versioned product
     const currentLatestValues: { [key: string]: string } = {};
-    
+
     for (const [key, history] of Object.entries(currentVersioned.info)) {
       if (history.length > 0) {
         const latestEntry = history[history.length - 1];
