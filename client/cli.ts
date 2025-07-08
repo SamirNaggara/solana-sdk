@@ -6,7 +6,7 @@ import { ProductInput, SafeoutSDK } from "./class_safeout";
 /*  Instance SDK (adapté à ton réseau + clés)                                 */
 /* -------------------------------------------------------------------------- */
 const sdk = new SafeoutSDK(
-  "Testnet",
+  "Devnet",
   "sha256",
   new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1"),
   new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
@@ -24,6 +24,34 @@ const ask = (q: string) => new Promise<string>((res) => rl.question(q, res));
 /* -------------------------------------------------------------------------- */
 /*  Démo produits                                                             */
 /* -------------------------------------------------------------------------- */
+const demoUniqueProduct: ProductInput = {
+   productUid: "7d4a3e6c-f1e9-4b55-9f20-b5c4a792f9de",
+    info: {
+      productId: "7d4a3e6c-f1e9-4b55-9f20-b5c4a792f9de",
+      productName: "EcoLaptop X200",
+      manufacturer: {
+        name: "GreenTech Electronics Ltd.",
+        address: "12 Circularity Avenue, Berlin, Germany",
+        contactEmail: "contact@greentechelectronics.eu"
+      },
+      dateOfManufacture: "2025-05-15",
+      placeOfManufacture: "Wroclaw, Poland",
+      productCategory: "Computers and laptops",
+      materialComposition: [
+        { material: "Aluminum", percentage: 45 },
+        { material: "Recycled plastic", percentage: 30 },
+        { material: "Glass", percentage: 10 },
+        { material: "Electronic components", percentage: 15 }
+      ],
+      hazardousSubstances: [
+        { substance: "Lead", casNumber: "7439-92-1", concentration: 0.08 },
+        { substance: "Mercury", casNumber: "7439-97-6", concentration: 0.001 }
+      ],
+      repairabilityScore: 7.2,
+      endOfLifeInstructions: "Remove battery using T5 screwdriver. SSD/RAM are modular. Label plastics.",
+      digitalLink: "https://dpp.greentechelectronics.eu/product/7d4a3e6c-f1e9-4b55-9f20-b5c4a792f9de"
+    }
+  };
 const demoProducts: ProductInput[] = [
   {
     productUid: "7d4a3e6c-f1e9-4b55-9f20-b5c4a792f9de",
@@ -123,11 +151,8 @@ async function mainLoop() {
     try {
       switch (action) {
         case "create": {
-          const id = await ask("Product UID : ");
-          const json = await ask("Metadata (JSON) : ");
-          const info = JSON.parse(json);
           const changedBy = await ask("Changed by (optional, press Enter for 'cli-user') : ");
-          console.log(await sdk.createDppProduct({ productUid: id, info }, changedBy || 'cli-user'));
+          console.log(await sdk.createDppProduct(demoUniqueProduct, changedBy || 'cli-user'));
           break;
         }
         case "update": {
@@ -165,8 +190,6 @@ async function mainLoop() {
             productUid: p.productUid,
             info: {
               ...p.info,
-              // // Exemple de modification : augmenter le score de réparabilité
-              // repairabilityScore: (p.info.repairabilityScore || 0) + 0.5,
             },
           }));
           const changedBy = await ask("Changed by (optional, press Enter for 'cli-user') : ");

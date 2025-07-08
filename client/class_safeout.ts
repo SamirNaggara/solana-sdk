@@ -111,7 +111,7 @@ export class SafeoutSDK {
       return DppProductSchema.parse(productData);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        throw error; // Re-throw Zod error to preserve detailed validation messages
+        throw error;
       }
       throw new Error(`Validation failed: ${error}`);
     }
@@ -131,19 +131,19 @@ export class SafeoutSDK {
     this.databaseUrl = databaseUrl;
     this.prisma = null;
     /* Select RPC endpoint based on the cluster name */
-    const url =
-      network === "Mainnet"
-        ? "https://api.mainnet-beta.solana.com"
-        : network === "Testnet"
-          ? "https://api.testnet.solana.com"
-          : "https://api.devnet.solana.com";
+    let url;
+    if (network == "Mainnet")
+      url = "https://api.mainnet-beta.solana.com";
+    if (network == "Testnet")
+      url = "https://api.testnet.solana.com"
+    else
+      url = "https://api.devnet.solana.com";
 
     this.connection = new Connection(url, "confirmed");
-    this.mint = null; // lazy‑initialised on first mint
+    this.mint = null;
   }
 
   public async init(): Promise<void> {
-    // Ensure the Prisma client is set up
     if (!this.prisma) {
       this.prisma = await this.setupPrisma(this.databaseUrl);
     }
@@ -278,7 +278,6 @@ export class SafeoutSDK {
       throw new Error("Prisma client is not initialized. Call init() first.");
     }
 
-    // Try to find existing manufacturer
     const existingManufacturer = await this.prisma.manufacturer.findFirst({
       where: {
         name: manufacturerData.name,
@@ -290,7 +289,6 @@ export class SafeoutSDK {
       return existingManufacturer.id;
     }
 
-    // Create new manufacturer
     const newManufacturer = await this.prisma.manufacturer.create({
       data: manufacturerData
     });
@@ -302,7 +300,11 @@ export class SafeoutSDK {
    * Convert ProductInput to Prisma create data
    */
   private async convertToCreateData(productInput: ProductInput) {
-    const manufacturerId = await this.createOrFindManufacturer(productInput.info.manufacturer);
+    const manufacturerId = await this.createOrFindManufacturer(productInput.info.manufacturer as {
+      name: string;
+      address: string;
+      contactEmail: string;
+    });
 
     return {
       id: productInput.productUid,
@@ -380,7 +382,6 @@ export class SafeoutSDK {
     productInput: ProductInput,
     changedBy?: string
   ): Promise<MintResult> {
-    // Validate product data using Zod schema
     this.validateProductData(productInput.info);
 
     if (!this.prisma) {
@@ -410,7 +411,6 @@ export class SafeoutSDK {
       productInput.productUid
     );
 
-    // Record creation in history
     await this.recordProductHistory(
       productInput.productUid,
       'CREATE',
@@ -435,7 +435,6 @@ export class SafeoutSDK {
     concurrency = 10,
     changedBy?: string
   ): Promise<MintResult[]> {
-    // Validate all products before processing
     products.forEach(product => {
       this.validateProductData(product.info);
     });
@@ -443,7 +442,6 @@ export class SafeoutSDK {
     if (!this.prisma) {
       throw new Error("Prisma client is not initialized. Call init() first.");
     }
-    // Fetch existing IDs in a single query for efficiency
     const ids = products.map((p) => p.productUid);
     const existing = await this.prisma.productDPP.findMany({
       where: { id: { in: ids } },
@@ -816,12 +814,10 @@ export class SafeoutSDK {
     }
 
     const hashData = this.hashObject(metadata);
-
     const ataInstruction = await this.createInstruction(payer);
     const memoPayload = JSON.stringify({
       hash: hashData,
     });
-
     try {
       const signature = await this.sendTransactionWithMemo(
         payer,
@@ -908,6 +904,7 @@ export class SafeoutSDK {
     const tasks = productIds.map((id, idx) =>
       limiter.schedule(async () => {
         try {
+
           /* — optional: sort metadata keys to obtain deterministic hashing — */
           const sortedEntries = Object.entries(metadataArray[idx]).sort(
             ([a], [b]) => a.localeCompare(b)
@@ -982,7 +979,7 @@ export class SafeoutSDK {
     payer: Signer
   ): Promise<TransactionInstruction | null> {
     if (!this.mint) this.mint = await this.initializeMint();
-
+    
     const ata = await getAssociatedTokenAddress(
       this.mint,
       this.owner,
@@ -990,8 +987,25 @@ export class SafeoutSDK {
       TOKEN_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
-    const info = await this.connection.getAccountInfo(ata);
-    if (info) return null; // already exists
+
+    try {
+      // Ajout d'un timeout et d'une gestion d'erreur pour éviter les boucles infinies
+      const info = await Promise.race([
+        this.connection.getAccountInfo(ata, "confirmed"),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("Timeout getting account info")), 10000)
+        )
+      ]);
+      
+      if (info) {
+        console.log(`ATA already exists for owner: ${this.owner.toString()}`);
+        return null; // already exists
+      }
+    } catch (error) {
+      console.warn(`Error checking ATA existence, proceeding with creation: ${error}`);
+      // Si on ne peut pas vérifier l'existence, on procède avec la création
+      // L'instruction échouera de manière gracieuse si l'ATA existe déjà
+    }
 
     return createAssociatedTokenAccountInstruction(
       payer.publicKey,

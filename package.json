@@ -8,7 +8,9 @@
     "dist"
   ],
   "scripts": {
-    "start": "ts-node mintToken.ts"
+    "start": "ts-node mintToken.ts",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@solana/spl-memo": "^0.2.5",
