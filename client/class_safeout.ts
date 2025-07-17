@@ -17,16 +17,16 @@ import {
   TransactionInstruction,
   EpochSchedule,
 } from "@solana/web3.js";
-import { createHash } from "crypto";
 import { createMemoInstruction, MEMO_PROGRAM_ID } from "@solana/spl-memo";
 import { getPayerKeypair } from "./lib/solanaUtils";
-import z from "zod";
-import { PrismaClient } from "@prisma/client";
-import Bottleneck from "bottleneck";
-import { execSync } from 'child_process';
 import { writeFileSync, mkdtempSync } from 'fs';
-import { join } from 'path';
+import { PrismaClient } from "@prisma/client";
 import DppProductSchema from "./SchemaZod";
+import { execSync } from 'child_process';
+import Bottleneck from "bottleneck";
+import { createHash } from "crypto";
+import { join } from 'path';
+import z from "zod";
 
 
 
@@ -143,6 +143,11 @@ export class SafeoutSDK {
     this.mint = null;
   }
 
+  /**
+   * Initializes the SDK by setting up Prisma and mint.
+   * @throws Error if Prisma setup fails or mint initialization fails
+   * This method must be called before any other SDK methods.
+   */
   public async init(): Promise<void> {
     if (!this.prisma) {
       this.prisma = await this.setupPrisma(this.databaseUrl);
@@ -154,6 +159,12 @@ export class SafeoutSDK {
   /* ----------------------------------------------------------------------- */
   /*                           Initialization Prisma                         */
   /* ----------------------------------------------------------------------- */
+  /**
+   * Sets up Prisma client and database schema.
+   * @param databaseUrl - The URL of the database to connect to
+   * @returns PrismaClient instance
+   * @throws Error if Prisma setup fails
+   */
   private async setupPrisma(databaseUrl: string): Promise<PrismaClient> {
     const schemaPath = join("prisma/", 'schema.prisma');
 
@@ -268,6 +279,8 @@ export class SafeoutSDK {
 
   /**
    * Create or find a manufacturer in the database
+   * @param manufacturerData - Manufacturer data to create or find
+   * @returns The ID of the existing or newly created manufacturer
    */
   private async createOrFindManufacturer(manufacturerData: {
     name: string;
@@ -298,6 +311,8 @@ export class SafeoutSDK {
 
   /**
    * Convert ProductInput to Prisma create data
+   * @param productInput - ProductInput object containing product data
+   * @returns Prisma create data object
    */
   private async convertToCreateData(productInput: ProductInput) {
     const manufacturerId = await this.createOrFindManufacturer(productInput.info.manufacturer as {
@@ -334,7 +349,9 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get the full product data for history recording
+   * Get full product data including relations
+   * @param productId - The ID of the product to retrieve
+   * @returns CompleteProduct object or null if not found
    */
   private async getFullProductData(productId: string): Promise<any | null> {
     if (!this.prisma) {
@@ -548,6 +565,8 @@ export class SafeoutSDK {
 
   /**
    * Update product with all its relations
+   * @param product - ProductInput object containing product data
+   * @throws Error if Prisma client is not initialized
    */
   private async updateProductWithRelations(product: ProductInput): Promise<void> {
     if (!this.prisma) {
@@ -832,7 +851,9 @@ export class SafeoutSDK {
   }
 
   /**
-   * Update an existing product token after metadata has changed.
+   * Get metadata for a product by its ID.
+   * @param productId - The ID of the product
+   * @returns Metadata object
    */
   private async updateMintToken(
     productUid: string
@@ -937,7 +958,9 @@ export class SafeoutSDK {
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Compare local metadata with the on‑chain hash stored in the memo.
+   * Get the memo associated with a product's signature.
+   * @param productId - The ID of the product
+   * @returns Memo string or null if not found
    */
   public async checkAuthenticityOnBlockchain(
     productId: string
@@ -956,12 +979,23 @@ export class SafeoutSDK {
   /*                              Low‑level utils                            */
   /* ----------------------------------------------------------------------- */
 
+  /**
+   * Send a transaction with a memo instruction.
+   * @param payer - The payer Keypair
+   * @param ataInstruction - Optional associated token account instruction
+   * @param memoPayload - The memo content to include
+   * @returns Transaction signature
+   */
   private async initializeMint(): Promise<PublicKey> {
     const payer = await getPayerKeypair();
     return createMint(this.connection, payer, this.mintAuthority, null, 0);
   }
 
-  /** Obtain the payer Keypair used for all write transactions */
+  /**
+   * Get the signature for a product by its ID.
+   * @returns Payer Keypair for transaction fees
+   * @throws Error if unable to get payer keypair
+   */
   private async getPayer(): Promise<Keypair> {
     return getPayerKeypair();
   }
@@ -972,8 +1006,9 @@ export class SafeoutSDK {
   }
 
   /**
-   * Build (or skip) an `createAssociatedTokenAccountInstruction` for the owner.
-   * Returns `null` if the ATA already exists.
+   * Check if a signature exists for a product ID.
+   * @param productId - The ID of the product
+   * @returns True if signature exists, false otherwise
    */
   private async createInstruction(
     payer: Signer
@@ -1018,7 +1053,11 @@ export class SafeoutSDK {
   }
 
   /* ----------------------------- DB helpers ------------------------------ */
-
+  /**
+   * Check if a signature exists for a product ID.
+   * @param productId - The ID of the product
+   * @returns True if signature exists, false otherwise
+   */
   private async getMetadataFromId(productId: string): Promise<string> {
     if (!this.prisma) {
       throw new Error("Prisma client is not initialized. Call init() first.");
@@ -1062,6 +1101,12 @@ export class SafeoutSDK {
     return JSON.stringify(productData);
   }
 
+  /**
+   * Get metadata for multiple products by their IDs.
+   * @param productIdArray - Array of product IDs
+   * @returns Array of metadata objects
+   * @throws Error if no products found for the provided IDs
+   */
   private async getMetadataFromIdArray(
     productIdArray: string[]
   ): Promise<object[]> {
@@ -1105,6 +1150,12 @@ export class SafeoutSDK {
     }));
   }
 
+  /**
+   * Get the memo from a product's signature.
+   * @param productId - The ID of the product
+   * @returns Memo string
+   * @throws Error if no signature or memo found
+   */
   private async getMemoFromSignature(productId: string): Promise<string> {
     const signature = await this.getSignatureFromId(productId);
     if (!signature) throw new Error(`No signature for ${productId}`);
@@ -1125,6 +1176,13 @@ export class SafeoutSDK {
     throw new Error("Memo not found");
   }
 
+  /**
+   * Send a transaction with a memo instruction.
+   * @param payer - The payer Keypair
+   * @param ataInstruction - Optional associated token account instruction
+   * @param memo - The memo content to include
+   * @returns Transaction signature
+   */
   private async sendTransactionWithMemo(
     payer: Keypair,
     ataInstruction: TransactionInstruction | null,
@@ -1144,6 +1202,12 @@ export class SafeoutSDK {
     });
   }
 
+  /**
+   * Get the signature for a product by its ID.
+   * @param productId - The ID of the product
+   * @returns Signature string or null if not found
+   * @throws Error if product not found
+   */
   private async getSignatureFromId(productId: string): Promise<string | null> {
     if (!this.prisma) {
       throw new Error("Prisma client is not initialized. Call init() first.");
@@ -1156,6 +1220,12 @@ export class SafeoutSDK {
     return product.signature ?? null;
   }
 
+  /**
+   * Set the signature for a product by its ID.
+   * @param productId - The ID of the product
+   * @param signature - The signature to set
+   * @throws Error if product not found or Prisma client not initialized
+   */
   private async setSignatureFromId(
     productId: string,
     signature: string
@@ -1174,6 +1244,11 @@ export class SafeoutSDK {
     });
   }
 
+  /**
+   * Check if a signature exists for a product ID.
+   * @param productId - The ID of the product
+   * @returns True if signature exists, false otherwise
+   */
   private async checkSignatureById(productId: string): Promise<boolean> {
     const sig = await this.getSignatureFromId(productId);
     return !!sig;
@@ -1181,6 +1256,11 @@ export class SafeoutSDK {
 
   /* ------------------------- Instruction type guard ---------------------- */
 
+  /**
+   * Type guard to check if an instruction is a ParsedInstruction.
+   * @param instruction - The instruction to check
+   * @returns True if the instruction is a ParsedInstruction, false otherwise
+   */
   private isParsedInstruction(
     instruction: ParsedInstruction | PartiallyDecodedInstruction
   ): instruction is ParsedInstruction {
@@ -1188,7 +1268,20 @@ export class SafeoutSDK {
   }
 
   /**
-   * Record a change in the product history
+   * Record a change in product history
+   * @param productId - The ID of the product
+   * @param action - The action performed (CREATE, UPDATE, DELETE)
+   * @param previousData - Previous product data (if applicable)
+   * @param newData - New product data (if applicable)
+   * @param changedBy - The user who made the change (default: 'system')
+   * @param changeDescription - Optional description of the change
+   * @throws Error if Prisma client is not initialized
+   * @throws Error if productId is not provided
+   * @throws Error if action is not one of CREATE, UPDATE, DELETE
+   * @throws Error if previousData or newData is not an object
+   * @throws Error if changedBy is not a string
+   * @throws Error if changeDescription is not a string
+   * @returns Promise<void>
    */
   private async recordProductHistory(
     productId: string,
@@ -1215,7 +1308,10 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get the history of changes for a product
+   * Get the history of a specific product by its ID
+   * @param productId - The ID of the product
+   * @returns Array of history records for the product
+   * @throws Error if Prisma client is not initialized
    */
   public async getProductHistory(productId: string): Promise<any[]> {
     if (!this.prisma) {
@@ -1231,7 +1327,15 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get the complete history of all products with pagination
+    * Get all product history with pagination
+    * @param page - Page number for pagination (default: 1)
+    * @param limit - Number of records per page (default: 50)
+    * @returns Object containing history records, total count, and total pages
+    * @throws Error if Prisma client is not initialized
+    * @throws Error if page or limit is not a positive integer
+    * @throws Error if page or limit is less than 1
+    * @throws Error if page or limit is greater than 1000
+    * @throws Error if page or limit is not a number
    */
   public async getAllProductHistory(
     page: number = 1,
@@ -1260,7 +1364,12 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get history filtered by action type
+   * Get product history filtered by action (CREATE, UPDATE, DELETE)
+   * @param action - The action to filter by
+   * @param page - Page number for pagination (default: 1)
+   * @param limit - Number of records per page (default: 50)
+   * @returns Object containing history records, total count, and total pages
+   * @throws Error if Prisma client is not initialized
    */
   public async getProductHistoryByAction(
     action: 'CREATE' | 'UPDATE' | 'DELETE',
@@ -1291,7 +1400,12 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get history filtered by user (changedBy)
+   * Get product history by user who made the changes
+   * @param changedBy - The user who made the changes
+   * @param page - Page number for pagination (default: 1)
+   * @param limit - Number of records per page (default: 50)
+   * @returns Object containing history records, total count, and total pages
+   * @throws Error if Prisma client is not initialized
    */
   public async getProductHistoryByUser(
     changedBy: string,
@@ -1322,7 +1436,13 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get history within a date range
+   * Get product history filtered by date range
+   * @param startDate - Start date for filtering
+   * @param endDate - End date for filtering
+   * @param page - Page number for pagination (default: 1)
+   * @param limit - Number of records per page (default: 50)
+   * @returns Object containing history records, total count, and total pages
+   * @throws Error if Prisma client is not initialized
    */
   public async getProductHistoryByDateRange(
     startDate: Date,
@@ -1366,7 +1486,10 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get statistics about product changes
+   * Get statistics about product history
+   * @returns Object containing total changes, create count, update count,
+   * delete count, unique products, and unique users
+   * @throws Error if Prisma client is not initialized
    */
   public async getProductHistoryStats(): Promise<{
     totalChanges: number;
