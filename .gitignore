@@ -1,4 +1,7 @@
 *keypair.json
+.env
 dist
 node_modules
 /generated/prisma
+Milestone
+mint-config.json

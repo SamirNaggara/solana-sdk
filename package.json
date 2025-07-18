@@ -8,10 +8,15 @@
     "dist"
   ],
   "scripts": {
-    "start": "ts-node mintToken.ts"
+    "start": "ts-node mintToken.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:mint": "jest --testNamePattern='Mint Management'",
+    "test:mint:unit": "jest __tests__/SafeoutSDK.mintManagement.test.ts",
+    "test:mint:integration": "jest __tests__/SafeoutSDK.mintManagement.integration.test.ts",
+    "test:user-normalization": "jest __tests__/SafeoutSDK.userNormalization.test.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.10.1",
     "@solana/spl-memo": "^0.2.5",
     "@solana/spl-token": "^0.3.0",
     "@solana/web3.js": "^1.98.2",
@@ -19,11 +24,15 @@
     "bottleneck": "^2.19.5",
     "cli-progress": "^3.12.0",
     "node-fetch": "^3.3.2",
-    "prisma": "^6.10.1",
     "zod": "^3.25.64"
   },
   "devDependencies": {
+    "@prisma/client": "^6.10.1",
+    "@types/jest": "^30.0.0",
     "@types/node-fetch": "^2.6.12",
+    "jest": "^30.0.3",
+    "prisma": "^6.10.1",
+    "ts-jest": "^29.4.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.8.3"
   }

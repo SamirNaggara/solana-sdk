@@ -1,482 +1,391 @@
-import {
-  createMint,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  TOKEN_PROGRAM_ID,
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-} from "@solana/spl-token";
+// Imports for Solana
 import {
   Connection,
-  Keypair,
-  ParsedInstruction,
-  PartiallyDecodedInstruction,
   PublicKey,
-  Transaction,
-  sendAndConfirmTransaction,
-  Signer,
-  TransactionInstruction,
+  Keypair,
 } from "@solana/web3.js";
-import { createHash } from "crypto";
-import { createMemoInstruction, MEMO_PROGRAM_ID } from "@solana/spl-memo";
+
+// Internal imports
 import { getPayerKeypair } from "./lib/solanaUtils";
-import z from "zod";
-import { PrismaClient } from "@prisma/client";
-import Bottleneck from "bottleneck";
-import { GetIDProductDPP } from "./GetIdProuctDPP";
-import { execSync } from 'child_process';
-import { writeFileSync, mkdtempSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { PrismaManager } from "./src/prisma-manager";
+import { ValidationUtils } from "./src/validation";
+import { MintManager } from "./src/mint-manager";
+import { TokenManager } from "./src/token-manager";
+import { HistoryManager } from "./src/history-manager";
+import { ProductInput, CompleteProduct, MintResult } from "./src/types";
 
-/** Supported Solana cluster names */
-export type NetworkValue = "Mainnet" | "Testnet" | "Devnet";
-
-/* -------------------------------------------------------------------------- */
-/*                                Helper types                                */
-/* -------------------------------------------------------------------------- */
+// Re-export types for external use
+export type { ProductInput, CompleteProduct, MintResult } from "./src/types";
 
 /**
- * Runtime‑validated shape of a product metadata object.
- * This is a placeholder and should be replaced with actual metadata schema.
- * The metadata can be anything, but it must be a valid JSON object.
+ * SafeoutSDK - Main SDK class for managing digital product passports (DPP) on Solana blockchain
  */
-const isoDateString = z.string().refine((val) => !isNaN(Date.parse(val)), {
-  message: "Must be a valid ISO‑8601 string",
-});
-
-const signatureString = z
-  .string()
-  .min(1, "Signature must be a non‑empty string");
-
-/** Runtime‑validated shape of a memo object stored on‑chain */
-const SignatureSchema = z.object({
-  hash: z.string().min(1, "Hash is required"),
-  updatedAt: isoDateString,
-  lastUpdate: z.array(signatureString).optional(),
-});
-
-export type ProductInput = { productUid: string; info: object };
-
-export interface MintResult {
-  productUid: string;
-  signature: string;
-  hash: string;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                                Safeout SDK                                 */
-/* -------------------------------------------------------------------------- */
-
 export class SafeoutSDK {
-  /* ---------------------------- instance fields --------------------------- */
+  private connection: Connection;
   private mintAuthority: PublicKey;
   private owner: PublicKey;
-  private hashAlgo: string;
-  private connection: Connection;
-  private prisma: PrismaClient | null;
-  private databaseUrl: string;
-  private mint: PublicKey | null;
+  private mint: PublicKey | null = null;
+  private hashAlgo: string = "sha256";
 
-  constructor(
-    network: NetworkValue,
-    hashAlgo: string,
-    mintAuthority: PublicKey,
-    owner: PublicKey,
-    databaseUrl: string
-  ) {
-    
+  // Manager instances
+  private prismaManager: PrismaManager;
+  private mintManager: MintManager;
+  private tokenManager: TokenManager | null = null;
+  private historyManager: HistoryManager | null = null;
+
+  /**
+   * Create a new SafeoutSDK instance
+   * @param connection - Solana connection instance
+   * @param mintAuthority - PublicKey of the mint authority
+   * @param owner - PublicKey of the token owner
+   */
+  constructor(connection: Connection, mintAuthority: PublicKey, owner: PublicKey) {
+    this.connection = connection;
     this.mintAuthority = mintAuthority;
-    this.hashAlgo = hashAlgo;
     this.owner = owner;
-    this.databaseUrl = databaseUrl;
-    this.prisma = null;
-    /* Select RPC endpoint based on the cluster name */
-    const url =
-      network === "Mainnet"
-        ? "https://api.mainnet-beta.solana.com"
-        : network === "Testnet"
-          ? "https://api.testnet.solana.com"
-          : "https://api.devnet.solana.com";
-
-    this.connection = new Connection(url, "confirmed");
-    this.mint = null; // lazy‑initialised on first mint
+    
+    // Initialize managers
+    this.prismaManager = new PrismaManager("");
+    this.mintManager = new MintManager(connection, mintAuthority);
   }
 
-  /* ----------------------------------------------------------------------- */
-  /*                           Initialization Prisma                         */
-  /* ----------------------------------------------------------------------- */
-  private async setupPrisma(databaseUrl: string): Promise<PrismaClient> {
-    const tempDir = mkdtempSync(join(tmpdir(), 'safeout-prisma-'));
-    const schemaPath = join(tempDir, 'schema.prisma');
-
-    const schema = `
-    datasource db {
-      provider = "postgresql"
-      url      = "${databaseUrl}"
-    }
-
-    generator client {
-      provider = "prisma-client-js"
-    }
-
-    model ProductDPP {
-      id        String   @id
-      info      Json
-      signature String?
-    }
-  `;
-
-    writeFileSync(schemaPath, schema);
-
+  /**
+   * Initialize the SDK - must be called before using other methods
+   */
+  public async init(): Promise<void> {
     try {
-      execSync(`npx prisma db push --schema="${schemaPath}"`, {
-        stdio: 'inherit',
-      });
-    } catch (err) {
-      throw new Error(`Prisma setup failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Setup Prisma with environment variable
+      const databaseUrl = process.env.DATABASE_URL || "";
+      if (!databaseUrl) {
+        throw new Error("DATABASE_URL environment variable is required");
+      }
+      await this.prismaManager.setupPrisma(databaseUrl);
+      
+      // Initialize mint
+      this.mint = await this.mintManager.initializeMint();
+      
+      // Initialize managers that need the mint
+      this.tokenManager = new TokenManager(
+        this.connection,
+        this.mint, // Use the actual mint, not mintAuthority
+        this.owner,
+        this.hashAlgo,
+        this.prismaManager.getPrisma()
+      );
+      
+      this.historyManager = new HistoryManager(this.prismaManager.getPrisma());
+      
+      console.log('SafeoutSDK initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize SafeoutSDK:', error);
+      throw error;
     }
-
-    const prisma = new PrismaClient({
-      datasources: {
-        db: {
-          url: databaseUrl,
-        },
-      },
-    });
-
-    await prisma.$connect();
-    return prisma;
   }
 
   /* ----------------------------------------------------------------------- */
-  /*                             Product creation                            */
+  /*                              Product CRUD                               */
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Create a single DPP product and immediately mint its token.
-   * @param productInput – `{ productUid, info }` structure.
-   * @throws Error if a product with the same UID already exists.
+   * Create a new DPP product
    */
   public async createDppProduct(
-    productInput: ProductInput
-  ): Promise<MintResult> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
-    }
-    const exists = await this.prisma.productDPP.findUnique({
-      where: { id: productInput.productUid },
-    });
-    if (exists) {
-      throw new Error(
-        `Product with ID ${productInput.productUid} already exists.`
-      );
+    productData: ProductInput,
+    changedBy?: string
+  ): Promise<CompleteProduct> {
+    if (!this.tokenManager || !this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
 
-    await this.prisma.productDPP.create({
-      data: {
-        id: productInput.productUid,
-        info: productInput.info,
-        signature: "", // filled right after minting
-      },
-    });
+    // Validate input data
+    const validatedInfo = ValidationUtils.validateProductData(productData.info);
 
-    const { signature, hash } = await this.createMintToken(
-      productInput.productUid
+    // Check if product already exists
+    const existingProduct = await this.prismaManager.getPrisma().productDPP.findUnique({
+      where: { id: productData.productUid }
+    });
+    
+    if (existingProduct) {
+      throw new Error(`Product with ID ${productData.productUid} already exists.`);
+    }
+
+    // Reconstruct complete ProductInput object with validated data
+    const validatedProductInput: ProductInput = {
+      productUid: productData.productUid,
+      info: validatedInfo
+    };
+
+    // Create product in database
+    const product = await this.prismaManager.createProductWithRelations(validatedProductInput);
+
+    // Create blockchain token
+    const mintResult = await this.tokenManager.createMintToken(product.id);
+
+    // Record in history
+    await this.historyManager.recordProductHistory(
+      product.id,
+      'CREATE',
+      null,
+      product,
+      ValidationUtils.normalizeUserName(changedBy),
+      'Product created'
     );
 
-    return { productUid: productInput.productUid, signature, hash };
+    return {
+      ...product,
+      signature: mintResult.signature,
+      hash: mintResult.hash,
+    };
   }
 
   /**
-   * Create several DPP products in one pass and mint their tokens in batch.
-   * @param products     Array of `{ productUid, info }` objects.
-   * @param concurrency  Maximum parallel mints handled by the rate‑limiter.
-   * @throws Error if all given products already exist.
+   * Create multiple DPP products in batch
    */
   public async createBatchDppProducts(
-    products: ProductInput[],
-    concurrency = 10
-  ): Promise<MintResult[]> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+    productsData: ProductInput[],
+    changedBy?: string
+  ): Promise<CompleteProduct[]> {
+    if (!this.tokenManager || !this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    // Fetch existing IDs in a single query for efficiency
-    const ids = products.map((p) => p.productUid);
-    const existing = await this.prisma.productDPP.findMany({
-      where: { id: { in: ids } },
-      select: { id: true },
-    });
-    const existingIds = new Set(existing.map((p) => p.id));
 
-    // Filter products which truly need to be created
-    const toInsert = products.filter((p) => !existingIds.has(p.productUid));
-    if (toInsert.length === 0) throw new Error("Every product already exists.");
-
-    await this.prisma.productDPP.createMany({
-      data: toInsert.map((p) => ({
-        id: p.productUid,
-        info: p.info,
-        signature: "",
-      })),
+    // Validate all products and reconstruct ProductInput objects
+    const validatedProducts = productsData.map(data => {
+      const validatedInfo = ValidationUtils.validateProductData(data.info);
+      return {
+        productUid: data.productUid,
+        info: validatedInfo
+      };
     });
 
-    const minted = await this.batchMintToken(
-      toInsert.map((p) => p.productUid),
-      concurrency
-    );
-
-    // Persist signatures in a single transaction for atomicity
-    await this.prisma.$transaction(
-      minted.map((m) =>
-        this.prisma!.productDPP.update({
-          where: { id: m.productUid },
-          data: { signature: m.signature },
-        })
+    // Create all products in database
+    const createdProducts = await Promise.all(
+      validatedProducts.map((productInput: ProductInput) => 
+        this.prismaManager.createProductWithRelations(productInput)
       )
     );
 
-    return minted;
+    // Mint tokens for all products
+    const productIds = createdProducts.map((p: any) => p.id);
+    const mintResults = await this.tokenManager.batchMintToken(productIds);
+
+    // Record history for all products
+    const normalizedUser = ValidationUtils.normalizeUserName(changedBy);
+    await Promise.all(
+      createdProducts.map((product: any) =>
+        this.historyManager!.recordProductHistory(
+          product.id,
+          'CREATE',
+          null,
+          product,
+          normalizedUser,
+          'Batch product creation'
+        )
+      )
+    );
+
+    // Combine results
+    return createdProducts.map((product: any, index: number) => {
+      const mintResult = mintResults.find(r => r.productUid === product.id);
+      return {
+        ...product,
+        signature: mintResult?.signature || null,
+        hash: mintResult?.hash || null,
+      };
+    });
   }
 
-  /* ----------------------------------------------------------------------- */
-  /*                          Product update – single                        */
-  /* ----------------------------------------------------------------------- */
-
   /**
-   * Update a single product’s metadata and refresh its on‑chain token.
-   * @param productUid – Unique identifier of the product.
-   * @param info       – New metadata object.
+   * Update an existing DPP product
    */
-  public async updateDppProduct(product: ProductInput): Promise<MintResult> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+  public async updateDppProduct(
+    productId: string,
+    updateData: Partial<ProductInput>,
+    changedBy?: string
+  ): Promise<CompleteProduct> {
+    if (!this.tokenManager || !this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    // 1️⃣ Update metadata in the database
-    await this.prisma.productDPP.update({
-      where: { id: product.productUid },
-      data: { info: product.info },
-    });
 
-    // 2️⃣ Refresh on‑chain representation
-    const { signature, hash } = await this.updateMintToken(product.productUid);
+    // Get existing product for history
+    const existingProduct = await this.prismaManager.getFullProductData(productId);
+    if (!existingProduct) {
+      throw new Error(`Product with ID ${productId} not found.`);
+    }
 
-    // 3️⃣ Persist the new signature in the DB
-    await this.prisma.productDPP.update({
-      where: { id: product.productUid },
-      data: { signature },
-    });
+    // Validate update data if info is provided
+    let validatedData;
+    if (updateData.info) {
+      validatedData = ValidationUtils.validateProductData(updateData.info);
+    } else {
+      validatedData = updateData;
+    }
 
-    return { productUid: product.productUid, signature, hash };
+    // Update product in database
+    const updatedProduct = await this.prismaManager.updateProductById(
+      productId,
+      validatedData
+    );
+
+    // Update blockchain token
+    const mintResult = await this.tokenManager.updateMintToken(productId);
+
+    // Record in history
+    await this.historyManager.recordProductHistory(
+      productId,
+      'UPDATE',
+      existingProduct,
+      updatedProduct,
+      ValidationUtils.normalizeUserName(changedBy),
+      'Product updated'
+    );
+
+    return {
+      ...updatedProduct,
+      signature: mintResult.signature,
+      hash: mintResult.hash,
+    };
   }
 
-  /* ----------------------------------------------------------------------- */
-  /*                          Product update – batch                         */
-  /* ----------------------------------------------------------------------- */
-
   /**
-   * Upsert multiple products: create those that are missing, update others,
-   * then (re)mint tokens for the whole batch.
-   * @param products     Array of product objects `{ productUid, info }`.
-   * @param concurrency  Maximum parallel mints.
+   * Update multiple DPP products in batch
    */
   public async updateBatchDppProducts(
-    products: ProductInput[],
-    concurrency = 10
-  ): Promise<MintResult[]> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
-    }
-    const ids = products.map((p) => p.productUid);
-    const existing = await this.prisma.productDPP.findMany({
-      where: { id: { in: ids } },
-      select: { id: true },
-    });
-    const existingIds = new Set(existing.map((p) => p.id));
-
-    const toCreate = products.filter((p) => !existingIds.has(p.productUid));
-    const toUpdate = products.filter((p) => existingIds.has(p.productUid));
-
-    if (toCreate.length) {
-      await this.prisma.productDPP.createMany({
-        data: toCreate.map((p) => ({
-          id: p.productUid,
-          info: p.info,
-          signature: "",
-        })),
-      });
+    updates: Array<{ productId: string; updateData: Partial<ProductInput> }>,
+    changedBy?: string
+  ): Promise<CompleteProduct[]> {
+    if (!this.tokenManager || !this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
 
-    if (toUpdate.length) {
-      await this.prisma.$transaction(
-        toUpdate.map((p) =>
-          this.prisma!.productDPP.update({
-            where: { id: p.productUid },
-            data: { info: p.info },
-          })
-        )
-      );
+    const results: CompleteProduct[] = [];
+    const normalizedUser = ValidationUtils.normalizeUserName(changedBy);
+
+    // Process updates sequentially to avoid conflicts
+    for (const { productId, updateData } of updates) {
+      try {
+        // Get existing product for history
+        const existingProduct = await this.prismaManager.getFullProductData(productId);
+        if (!existingProduct) {
+          console.warn(`Product with ID ${productId} not found, skipping.`);
+          continue;
+        }
+
+        // Validate and update
+        let validatedData;
+        if (updateData.info) {
+          validatedData = ValidationUtils.validateProductData(updateData.info);
+        } else {
+          validatedData = updateData;
+        }
+        const updatedProduct = await this.prismaManager.updateProductById(
+          productId,
+          validatedData
+        );
+
+        // Update blockchain token
+        const mintResult = await this.tokenManager.updateMintToken(productId);
+
+        // Record in history
+        await this.historyManager.recordProductHistory(
+          productId,
+          'UPDATE',
+          existingProduct,
+          updatedProduct,
+          normalizedUser,
+          'Batch product update'
+        );
+
+        results.push({
+          ...updatedProduct,
+          signature: mintResult.signature,
+          hash: mintResult.hash,
+        });
+      } catch (error) {
+        console.error(`Error updating product ${productId}:`, error);
+      }
     }
 
-    const minted = await this.batchMintToken(
-      products.map((p) => p.productUid),
-      concurrency
+    return results;
+  }
+
+  /**
+   * Delete a DPP product
+   */
+  public async deleteDppProduct(productId: string, changedBy?: string): Promise<void> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
+    }
+
+    // Get existing product for history
+    const existingProduct = await this.prismaManager.getFullProductData(productId);
+    if (!existingProduct) {
+      throw new Error(`Product with ID ${productId} not found.`);
+    }
+
+    // Record deletion in history before deleting
+    await this.historyManager.recordProductHistory(
+      productId,
+      'DELETE',
+      existingProduct,
+      null,
+      ValidationUtils.normalizeUserName(changedBy),
+      'Product deleted'
     );
 
-    await this.prisma.$transaction(
-      minted.map((m) =>
-        this.prisma!.productDPP.update({
-          where: { id: m.productUid },
-          data: { signature: m.signature },
-        })
+    // Delete from database
+    await this.prismaManager.deleteProductWithRelations(productId);
+  }
+
+  /**
+   * Delete multiple products in batch
+   */
+  public async deleteBatchDppProducts(productIds: string[], changedBy?: string): Promise<void> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
+    }
+
+    const prisma = this.prismaManager.getPrisma();
+
+    // Get existing products data for history
+    const existingProducts = await Promise.all(
+      productIds.map(id => this.prismaManager.getFullProductData(id))
+    );
+
+    // Filter out non-existent products
+    const validProducts = existingProducts.filter((p: any) => p !== null);
+    const validProductIds = validProducts.map((p: any) => p.id);
+
+    if (validProductIds.length === 0) {
+      throw new Error("No valid products found to delete.");
+    }
+
+    // Record deletions in history before actually deleting
+    await Promise.all(
+      validProducts.map((product: any) =>
+        this.historyManager!.recordProductHistory(
+          product.id,
+          'DELETE',
+          product,
+          null,
+          ValidationUtils.normalizeUserName(changedBy),
+          'Batch product deletion'
+        )
       )
     );
 
-    return minted;
-  }
-
-  /* ----------------------------------------------------------------------- */
-  /*                              Token helpers                              */
-  /* ----------------------------------------------------------------------- */
-
-  /**
-   * Mint a token for a newly‑created product.
-   * @throws Error if a signature already exists for the product.
-   */
-  private async createMintToken(
-    productId: string
-  ): Promise<{ signature: string; hash: string }> {
-    if (!this.mint) this.mint = await this.initializeMint();
-
-    const payer = await this.getPayer();
-    const metadata = await this.getMetadataFromId(productId);
-
-    if (await this.getSignatureFromId(productId)) {
-      throw new Error(`Token already created for product ID ${productId}`);
-    }
-
-    const hashData = this.hashObject(metadata);
-
-    const ataInstruction = await this.createInstruction(payer);
-    const memoPayload = JSON.stringify({
-      hash: hashData,
-      updatedAt: new Date().toISOString(),
-      lastUpdate: [],
-    });
-
-    try {
-      const signature = await this.sendTransactionWithMemo(
-        payer,
-        ataInstruction,
-        memoPayload
-      );
-      await this.setSignatureFromId(productId, signature);
-      return { signature, hash: hashData };
-    } catch (err) {
-      throw new Error(`Transaction failed: ${err}`);
-    }
-  }
-
-  /**
-   * Update an existing product token after metadata has changed.
-   */
-  private async updateMintToken(
-    productUid: string
-  ): Promise<{ signature: string; hash: string }> {
-    if (!this.mint) this.mint = await this.initializeMint();
-
-    const existingMemo = await this.getMemoFromSignature(productUid);
-    if (!existingMemo)
-      throw new Error("No memo found for the given product UID.");
-
-    const currentSignature = await this.getSignatureFromId(productUid);
-    if (!currentSignature)
-      throw new Error("No signature found for the given product UID.");
-
-    const memoData = SignatureSchema.parse(JSON.parse(existingMemo));
-    const metadata = await this.getMetadataFromId(productUid);
-    const newHash = this.hashObject(metadata);
-
-    if (memoData.hash === newHash)
-      throw new Error("Metadata has not changed; no update needed.");
-
-    memoData.hash = newHash;
-    memoData.updatedAt = new Date().toISOString();
-    memoData.lastUpdate = [...(memoData.lastUpdate ?? []), currentSignature];
-
-    const payer = await this.getPayer();
-    const ataInstruction = await this.createInstruction(payer);
-    const memoPayload = JSON.stringify({
-      hash: memoData.hash,
-      updatedAt: memoData.updatedAt,
-      lastUpdate: memoData.lastUpdate,
-    });
-
-    try {
-      const newSignature = await this.sendTransactionWithMemo(
-        payer,
-        ataInstruction,
-        memoPayload
-      );
-      await this.setSignatureFromId(productUid, newSignature);
-      return { signature: newSignature, hash: memoData.hash };
-    } catch (err) {
-      throw new Error(`Transaction failed: ${err}`);
-    }
-  }
-
-  /* ----------------------------------------------------------------------- */
-  /*                              Batch helper                               */
-  /* ----------------------------------------------------------------------- */
-
-  /**
-   * Mint or update tokens for several products concurrently, preserving order.
-   * @param productIds  Array of product UIDs.
-   * @param concurrency Maximum parallel jobs handled by Bottleneck.
-   */
-  private async batchMintToken(
-    productIds: string[],
-    concurrency = 10
-  ): Promise<MintResult[]> {
-    const metadataArray = await this.getMetadataFromIdArray(productIds);
-    if (!this.mint) this.mint = await this.initializeMint();
-
-    const limiter = new Bottleneck({
-      maxConcurrent: concurrency,
-      minTime: 100,
-      reservoir: 20,
-      reservoirRefreshAmount: 20,
-      reservoirRefreshInterval: 10 * 100,
-    });
-    const results: (MintResult | undefined)[] = new Array(productIds.length);
-
-    const tasks = productIds.map((id, idx) =>
-      limiter.schedule(async () => {
-        try {
-          /* — optional: sort metadata keys to obtain deterministic hashing — */
-          const sortedEntries = Object.entries(metadataArray[idx]).sort(
-            ([a], [b]) => a.localeCompare(b)
-          );
-          JSON.stringify(Object.fromEntries(sortedEntries)); // computed but unused; kept for parity with original code
-
-          let signature: string, hash: string;
-          if (!(await this.checkSignatureById(id))) {
-            ({ signature, hash } = await this.createMintToken(id));
-          } else {
-            ({ signature, hash } = await this.updateMintToken(id));
-          }
-
-          results[idx] = { productUid: id, signature, hash };
-        } catch (err: any) {
-          console.error(
-            `Error on product ${id} (${idx + 1}/${productIds.length}):`,
-            err?.message ?? err
-          );
-        }
-      })
-    );
-
-    await Promise.all(tasks);
-    return results.filter(Boolean) as MintResult[];
+    // Delete all products and related data in a transaction
+    await prisma.$transaction([
+      prisma.materialComposition.deleteMany({
+        where: { productId: { in: validProductIds } },
+      }),
+      prisma.hazardousSubstance.deleteMany({
+        where: { productId: { in: validProductIds } },
+      }),
+      prisma.productDPP.deleteMany({
+        where: { id: { in: validProductIds } },
+      }),
+    ]);
   }
 
   /* ----------------------------------------------------------------------- */
@@ -484,182 +393,154 @@ export class SafeoutSDK {
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Compare local metadata with the on‑chain hash stored in the memo.
+   * Check authenticity on blockchain
    */
   public async checkAuthenticityOnBlockchain(
     productId: string
   ): Promise<{ isValid: boolean; reason?: string }> {
-    const metadata = await this.getMetadataFromId(productId);
-    const localHash = this.hashObject(metadata);
-    const memo = await this.getMemoFromSignature(productId);
-    const memoData = SignatureSchema.parse(JSON.parse(memo));
-
-    if (memoData.hash !== localHash)
-      return { isValid: false, reason: "Hash mismatch" };
-    return { isValid: true };
+    if (!this.tokenManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
+    }
+    
+    return this.tokenManager.checkAuthenticityOnBlockchain(productId);
   }
 
   /* ----------------------------------------------------------------------- */
-  /*                              Low‑level utils                            */
+  /*                              Public utilities                            */
   /* ----------------------------------------------------------------------- */
 
-  private async initializeMint(): Promise<PublicKey> {
-    const payer = await getPayerKeypair();
-    return createMint(this.connection, payer, this.mintAuthority, null, 0);
-  }
-
-  /** Obtain the payer Keypair used for all write transactions */
-  private async getPayer(): Promise<Keypair> {
-    return getPayerKeypair();
-  }
-
-  /** Hash arbitrary JSON using the configured algorithm */
-  private hashObject(obj: string): string {
-    return createHash(this.hashAlgo).update(obj).digest("hex");
+  /**
+   * Check and top up SOL balance if needed
+   */
+  public async checkAndTopUpBalance(minBalance: number = 0.1): Promise<boolean> {
+    return this.mintManager.checkAndTopUpBalance(minBalance);
   }
 
   /**
-   * Build (or skip) an `createAssociatedTokenAccountInstruction` for the owner.
-   * Returns `null` if the ATA already exists.
+   * Get current mint information
    */
-  private async createInstruction(
-    payer: Signer
-  ): Promise<TransactionInstruction | null> {
-    if (!this.mint) this.mint = await this.initializeMint();
-
-    const ata = await getAssociatedTokenAddress(
-      this.mint,
-      this.owner,
-      false,
-      TOKEN_PROGRAM_ID,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    );
-    const info = await this.connection.getAccountInfo(ata);
-    if (info) return null; // already exists
-
-    return createAssociatedTokenAccountInstruction(
-      payer.publicKey,
-      ata,
-      this.owner,
-      this.mint,
-      TOKEN_PROGRAM_ID,
-      ASSOCIATED_TOKEN_PROGRAM_ID
-    );
+  public getMintInfo(): { mintAddress: string | null; mintAuthority: string } {
+    return {
+      mintAddress: this.mint?.toString() || null,
+      mintAuthority: this.mintAuthority.toString()
+    };
   }
 
-  /* ----------------------------- DB helpers ------------------------------ */
+  /**
+   * Get current SOL balance
+   */
+  public async getBalance(): Promise<number> {
+    return this.mintManager.getBalance();
+  }
 
-  private async getMetadataFromId(productId: string): Promise<string> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+  /**
+   * Get the history of a specific product by its ID
+   */
+  public async getProductHistory(productId: string): Promise<any[]> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    const product = await this.prisma.productDPP.findUnique({
-      where: { id: productId },
-    });
-    if (!product) throw new Error(`Product with ID ${productId} not found.`);
-    return JSON.stringify(product.info);
+    return this.historyManager.getProductHistory(productId);
   }
 
-  private async getMetadataFromIdArray(
-    productIdArray: string[]
-  ): Promise<object[]> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+  /**
+   * Get all product history with pagination
+   */
+  public async getAllProductHistory(
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    const products = await this.prisma.productDPP.findMany({
-      where: { id: { in: productIdArray } },
-      select: { info: true },
-    });
-    if (!products.length)
-      throw new Error("No products found for the provided IDs.");
-    return products
-      .map((p) => p.info)
-      .filter(
-        (info): info is object => info !== null && typeof info === "object"
-      );
+    return this.historyManager.getAllProductHistory(page, limit);
   }
 
-  private async getMemoFromSignature(productId: string): Promise<string> {
-    const signature = await this.getSignatureFromId(productId);
-    if (!signature) throw new Error(`No signature for ${productId}`);
-
-    const tx = await this.connection.getParsedTransaction(signature, {
-      commitment: "confirmed",
-    });
-    if (!tx) throw new Error("Transaction not found.");
-
-    for (const ix of tx.transaction.message.instructions) {
-      if (
-        ix.programId.equals(MEMO_PROGRAM_ID) &&
-        this.isParsedInstruction(ix)
-      ) {
-        return ix.parsed as unknown as string; // spl‑memo stores raw string in parsed field
-      }
+  /**
+   * Get product history filtered by action (CREATE, UPDATE, DELETE)
+   */
+  public async getProductHistoryByAction(
+    action: 'CREATE' | 'UPDATE' | 'DELETE',
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    throw new Error("Memo not found");
+    return this.historyManager.getProductHistoryByAction(action, page, limit);
   }
 
-  private async sendTransactionWithMemo(
-    payer: Keypair,
-    ataInstruction: TransactionInstruction | null,
-    memo: string
-  ): Promise<string> {
-    const tx = new Transaction();
-    if (ataInstruction) tx.add(ataInstruction);
-    tx.add(createMemoInstruction(memo, [payer.publicKey]));
-
-    const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
-    tx.recentBlockhash = blockhash;
-    tx.feePayer = payer.publicKey;
-
-    return sendAndConfirmTransaction(this.connection, tx, [payer], {
-      skipPreflight: false,
-      commitment: "confirmed",
-    });
-  }
-
-  private async getSignatureFromId(productId: string): Promise<string | null> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+  /**
+   * Get product history by user who made the changes
+   */
+  public async getProductHistoryByUser(
+    changedBy: string,
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    const product = await this.prisma.productDPP.findUnique({
-      where: { id: productId },
-      select: { signature: true },
-    });
-    if (!product) throw new Error(`Product with ID ${productId} not found.`);
-    return product.signature ?? null;
+    return this.historyManager.getProductHistoryByUser(changedBy, page, limit);
   }
 
-  private async setSignatureFromId(
-    productId: string,
-    signature: string
-  ): Promise<void> {
-    if (!this.prisma) {
-      this.prisma = await this.setupPrisma(this.databaseUrl);
+  /**
+   * Get product history filtered by date range
+   */
+  public async getProductHistoryByDateRange(
+    startDate: Date,
+    endDate: Date,
+    page: number = 1,
+    limit: number = 50
+  ): Promise<{ history: any[], total: number, totalPages: number }> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
     }
-    const product = await this.prisma.productDPP.findUnique({
-      where: { id: productId },
-    });
-    if (!product) throw new Error(`Product with ID ${productId} not found.`);
-    if (product.signature)
-      throw new Error(`Signature already exists for product ID ${productId}.`);
-
-    await this.prisma.productDPP.update({
-      where: { id: productId },
-      data: { signature },
-    });
+    return this.historyManager.getProductHistoryByDateRange(startDate, endDate, page, limit);
   }
 
-  private async checkSignatureById(productId: string): Promise<boolean> {
-    const sig = await this.getSignatureFromId(productId);
-    return !!sig;
+  /**
+   * Get statistics about product history
+   */
+  public async getProductHistoryStats(): Promise<{
+    totalChanges: number;
+    createCount: number;
+    updateCount: number;
+    deleteCount: number;
+    uniqueProducts: number;
+    uniqueUsers: number;
+  }> {
+    if (!this.historyManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
+    }
+    return this.historyManager.getProductHistoryStats();
   }
 
-  /* ------------------------- Instruction type guard ---------------------- */
+  /**
+   * Normalize user name (for testing access)
+   */
+  public normalizeUserName(userName?: string): string {
+    return ValidationUtils.normalizeUserName(userName);
+  }
 
-  private isParsedInstruction(
-    instruction: ParsedInstruction | PartiallyDecodedInstruction
-  ): instruction is ParsedInstruction {
-    return (instruction as ParsedInstruction).parsed !== undefined;
+  // Testing methods - accessing manager methods for test compatibility
+  private saveMintConfig(mintAddress: PublicKey): void {
+    return this.mintManager.saveMintConfig(mintAddress);
+  }
+
+  private loadMintConfig(): PublicKey | null {
+    return this.mintManager.loadMintConfig();
+  }
+
+  private async mintExists(mintAddress: PublicKey): Promise<boolean> {
+    return this.mintManager.mintExists(mintAddress);
+  }
+
+  private async initializeMint(): Promise<PublicKey> {
+    return this.mintManager.initializeMint();
+  }
+
+  private async setupPrisma(): Promise<any> {
+    return this.prismaManager.setupPrisma(process.env.DATABASE_URL || "");
   }
 }
