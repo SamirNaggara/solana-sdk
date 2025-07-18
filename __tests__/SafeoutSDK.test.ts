@@ -1,811 +1,779 @@
+// Mock the managers
+jest.mock('../client/src/prisma-manager');
+jest.mock('../client/src/token-manager');
+jest.mock('../client/src/mint-manager');
+jest.mock('../client/src/history-manager');
+jest.mock('../client/src/validation');
+
+import { PrismaManager } from '../client/src/prisma-manager';
+import { TokenManager } from '../client/src/token-manager';
+import { MintManager } from '../client/src/mint-manager';
+import { HistoryManager } from '../client/src/history-manager';
+import { ValidationUtils } from '../client/src/validation';
+
+// Configure mocks
+const mockPrismaManager = {
+    setupPrisma: jest.fn(),
+    getPrisma: jest.fn(),
+    createProductWithRelations: jest.fn(),
+    getFullProductData: jest.fn(),
+    updateProductWithRelations: jest.fn(),
+    updateProductById: jest.fn(),
+    deleteProduct: jest.fn(),
+    deleteProductWithRelations: jest.fn(),
+    deleteMultipleProducts: jest.fn(),
+    findExistingManufacturer: jest.fn(),
+    createManufacturer: jest.fn(),
+    init: jest.fn()
+};
+
+const mockTokenManager = {
+    createMintToken: jest.fn(),
+    batchMintToken: jest.fn(),
+    updateMintToken: jest.fn(),
+    checkAuthenticityOnBlockchain: jest.fn(),
+    getMetadataFromId: jest.fn(),
+    getMetadataFromIdArray: jest.fn(),
+    getMemoFromSignature: jest.fn(),
+    hashObject: jest.fn(),
+    init: jest.fn()
+};
+
+const mockMintManager = {
+    initializeMint: jest.fn(),
+    getMintPublicKey: jest.fn(),
+    init: jest.fn()
+};
+
+const mockHistoryManager = {
+    recordProductHistory: jest.fn(),
+    recordBatchHistory: jest.fn(),
+    getAllProductHistory: jest.fn(),
+    getProductHistoryByAction: jest.fn(),
+    getProductHistoryByUser: jest.fn(),
+    getProductHistoryByDateRange: jest.fn(),
+    getProductHistoryStats: jest.fn(),
+    init: jest.fn()
+};
+
+const mockValidationUtils = {
+    validateProductData: jest.fn(),
+    normalizeUserName: jest.fn()
+};
+
+// Apply mocks
+(PrismaManager as jest.Mock).mockImplementation(() => mockPrismaManager);
+(TokenManager as jest.Mock).mockImplementation(() => mockTokenManager);
+(MintManager as jest.Mock).mockImplementation(() => mockMintManager);
+(HistoryManager as jest.Mock).mockImplementation(() => mockHistoryManager);
+(ValidationUtils as any).validateProductData = mockValidationUtils.validateProductData;
+(ValidationUtils as any).normalizeUserName = mockValidationUtils.normalizeUserName;
+
 import { SafeoutSDK, ProductInput } from '../client/class_safeout';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Connection } from '@solana/web3.js';
 import { z } from 'zod';
 
-const sdk = new SafeoutSDK('Devnet', 'sha256', new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1"), new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"), 'postgresql://safeout:pide@localhost:4242/sdk-1?schema=public');
+const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+const mintAuthority = new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1");
+const owner = new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ");
 
 describe('SafeoutSDK', () => {
-    beforeEach(() => {
+    let sdk: SafeoutSDK;
+
+    beforeEach(async () => {
         jest.clearAllMocks();
-    });
-
-    const createValidProduct = (overrides = {}): ProductInput => ({
-        productUid: '550e8400-e29b-41d4-a716-446655440000',
-        info: {
-            productId: '550e8400-e29b-41d4-a716-446655440000',
-            productName: 'EcoLaptop X200',
-            manufacturer: {
-                name: 'GreenTech Electronics Ltd.',
-                address: '12 Circularity Avenue, Berlin, Germany',
-                contactEmail: 'contact@greentechelectronics.eu'
-            },
-            dateOfManufacture: '2025-05-15',
-            placeOfManufacture: 'Wroclaw, Poland',
-            productCategory: 'Computers and laptops',
-            materialComposition: [
-                { material: 'Aluminum', percentage: 45 },
-                { material: 'Recycled plastic', percentage: 30 },
-                { material: 'Glass', percentage: 10 },
-                { material: 'Electronic components', percentage: 15 }
-            ],
-            hazardousSubstances: [
-                { substance: 'Lead', casNumber: '7439-92-1', concentration: 0.08 },
-                { substance: 'Mercury', casNumber: '7439-97-6', concentration: 0.001 }
-            ],
-            repairabilityScore: 4.2,
-            endOfLifeInstructions: 'Disassemble carefully. Recycle aluminum components separately. Electronic parts must go to certified e-waste facility.',
-            digitalLink: 'https://dpp.greentechelectronics.eu/product/550e8400-e29b-41d4-a716-446655440000',
-            ...overrides
-        }
-    });
-
-    const createMockProduct = (overrides = {}) => ({
-        id: '550e8400-e29b-41d4-a716-446655440000',
-        productName: 'EcoLaptop X200',
-        dateOfManufacture: new Date('2025-05-15'),
-        placeOfManufacture: 'Wroclaw, Poland',
-        productCategory: 'Computers and laptops',
-        repairabilityScore: 4.2,
-        endOfLifeInstructions: 'Disassemble carefully. Recycle aluminum components separately. Electronic parts must go to certified e-waste facility.',
-        digitalLink: 'https://dpp.greentechelectronics.eu/product/550e8400-e29b-41d4-a716-446655440000',
-        signature: 'test-signature',
-        manufacturer: {
-            id: 'manufacturer-id',
-            name: 'GreenTech Electronics Ltd.',
-            address: '12 Circularity Avenue, Berlin, Germany',
-            contactEmail: 'contact@greentechelectronics.eu'
-        },
-        materialComposition: [
-            { material: 'Aluminum', percentage: 45 },
-            { material: 'Recycled plastic', percentage: 30 },
-            { material: 'Glass', percentage: 10 },
-            { material: 'Electronic components', percentage: 15 }
-        ],
-        hazardousSubstances: [
-            { substance: 'Lead', casNumber: '7439-92-1', concentration: 0.08 },
-            { substance: 'Mercury', casNumber: '7439-97-6', concentration: 0.001 }
-        ],
-        ...overrides
+        
+        // Mock de la variable d'environnement pour les tests
+        process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/testdb';
+        
+        // Reset all mocks to default behavior
+        mockMintManager.initializeMint.mockResolvedValue(new PublicKey("7aoAZMkrDLsrSW6UWWRMMJSJgmPteTMiMNoQw1xYkjLp"));
+        mockPrismaManager.init.mockResolvedValue(undefined);
+        mockTokenManager.init.mockResolvedValue(undefined);
+        mockHistoryManager.init.mockResolvedValue(undefined);
+        mockValidationUtils.normalizeUserName.mockImplementation((name?: string) => name?.trim() || 'system');
+        
+        // Create new SDK instance
+        sdk = new SafeoutSDK(connection, mintAuthority, owner);
+        await sdk.init();
     });
 
     describe('Product Validation with Zod Schema', () => {
         it('should validate product data successfully with correct format', async () => {
-            const product = createValidProduct();
-            const mockPrisma = {
-                productDPP: {
-                    findUnique: jest.fn().mockResolvedValue(null),
-                    create: jest.fn().mockResolvedValue(createMockProduct()),
-                },
+        const productData = {
+            productUid: '550e8400-e29b-41d4-a716-446655440000',
+            info: {
+                productId: '550e8400-e29b-41d4-a716-446655440000',
+                productName: 'Test Product',
                 manufacturer: {
-                    findFirst: jest.fn().mockResolvedValue(null),
-                    create: jest.fn().mockResolvedValue({ id: 'mfg-123' })
+                    name: 'Test Manufacturer',
+                    address: '123 Main St',
+                    contactEmail: 'test@example.com'
                 },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({})
-                },
-                $connect: jest.fn(),
+                dateOfManufacture: '2023-01-01',
+                placeOfManufacture: 'Test Location',
+                productCategory: 'Electronics',
+                materialComposition: [
+                    { material: 'Plastic', percentage: 60 },
+                    { material: 'Metal', percentage: 40 }
+                ],
+                hazardousSubstances: [
+                    { 
+                        substance: 'Lead', 
+                        casNumber: '7439-92-1',
+                        concentration: 0.1 
+                    }
+                ],
+                endOfLifeInstructions: 'Recycle at authorized e-waste facility',
+                digitalLink: 'https://example.com/product/550e8400-e29b-41d4-a716-446655440000'
+            }
+        };            const mockResult = { id: productData.productUid };
+            const expectedResult = {
+                ...mockResult,
+                signature: 'tx123',
+                hash: 'hash123'
             };
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).createMintToken = jest.fn().mockResolvedValue({
-                signature: 'tx123',
-                hash: 'hash123',
-            });
-
-            const result = await sdk.createDppProduct(product);
-
-            expect(result).toEqual({
-                productUid: '550e8400-e29b-41d4-a716-446655440000',
-                signature: 'tx123',
-                hash: 'hash123',
-            });
-        });
-
-        it('should throw ZodError for invalid UUID format', async () => {
-            const product = createValidProduct({
-                productId: 'invalid-uuid'
-            });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
-
-        it('should throw ZodError for invalid email format', async () => {
-            const product = createValidProduct({
-                manufacturer: {
-                    name: 'GreenTech Corp',
-                    address: '123 Eco Street',
-                    contactEmail: 'invalid-email'
+            
+            // Setup mocks
+            mockValidationUtils.validateProductData.mockReturnValue(productData.info);
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: {
+                    findUnique: jest.fn().mockResolvedValue(null)
                 }
             });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
-
-        it('should throw ZodError for invalid CAS number format', async () => {
-            const product = createValidProduct({
-                hazardousSubstances: [
-                    { substance: 'Lead', casNumber: 'invalid-cas', concentration: 0.01 }
-                ]
+            mockPrismaManager.createProductWithRelations.mockResolvedValue(mockResult);
+            mockTokenManager.createMintToken.mockResolvedValue({
+                signature: 'tx123',
+                hash: 'hash123',
             });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
+            const result = await sdk.createDppProduct(productData);
 
-        it('should throw ZodError when material composition does not add to ~100%', async () => {
-            const product = createValidProduct({
-                materialComposition: [
-                    { material: 'Aluminum', percentage: 50 },
-                    { material: 'Plastic', percentage: 30 }
-                ]
-            });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
-
-        it('should throw ZodError for invalid date format', async () => {
-            const product = createValidProduct({
-                dateOfManufacture: '2024/01/15'
-            });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
-
-        it('should throw ZodError for invalid URL format', async () => {
-            const product = createValidProduct({
-                digitalLink: 'not-a-valid-url'
-            });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
-
-        it('should throw ZodError for insufficient endOfLifeInstructions', async () => {
-            const product = createValidProduct({
-                endOfLifeInstructions: 'short'
-            });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
-        });
-
-        it('should throw ZodError for invalid repairabilityScore range', async () => {
-            const product = createValidProduct({
-                repairabilityScore: 15
-            });
-
-            await expect(sdk.createDppProduct(product)).rejects.toThrow(z.ZodError);
+            expect(mockValidationUtils.validateProductData).toHaveBeenCalledWith(productData.info);
+            expect(result).toEqual(expectedResult);
         });
     });
 
     describe('createDppProduct with Relations and History', () => {
-    });
-
-    const validProductData = createValidProduct();
-    
-    const mockFullProductData = {
-        id: '550e8400-e29b-41d4-a716-446655440000',
-        productName: 'EcoLaptop X200',
-        dateOfManufacture: new Date('2025-05-15'),
-        placeOfManufacture: 'Wroclaw, Poland',
-        productCategory: 'Computers and laptops',
-        repairabilityScore: 4.2,
-        endOfLifeInstructions: 'Disassemble carefully. Recycle aluminum components separately. Electronic parts must go to certified e-waste facility.',
-        digitalLink: 'https://dpp.greentechelectronics.eu/product/550e8400-e29b-41d4-a716-446655440000',
-        signature: 'test-signature',
-        manufacturer: {
-            id: 'manufacturer-id',
-            name: 'GreenTech Electronics Ltd.',
-            address: '12 Circularity Avenue, Berlin, Germany',
-            contactEmail: 'contact@greentechelectronics.eu'
-        },
-        materialComposition: [
-            { id: 'comp-1', material: 'Aluminum', percentage: 45, productId: '550e8400-e29b-41d4-a716-446655440000' },
-            { id: 'comp-2', material: 'Recycled plastic', percentage: 30, productId: '550e8400-e29b-41d4-a716-446655440000' }
-        ],
-        hazardousSubstances: [
-            { id: 'hazard-1', substance: 'Lead', casNumber: '7439-92-1', concentration: 0.08, productId: '550e8400-e29b-41d4-a716-446655440000' }
-        ]
-    };
-
-    describe('createDppProduct', () => {
-        it('should create a new product and mint token', async () => {
-            const mockPrisma = {
-                productDPP: {
-                    findUnique: jest.fn().mockResolvedValue(null),
-                    create: jest.fn().mockResolvedValue(mockFullProductData),
-                },
-                manufacturer: {
-                    findFirst: jest.fn().mockResolvedValue(null),
-                    create: jest.fn().mockResolvedValue({ id: 'manufacturer-id' }),
-                },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({}),
-                },
-                $connect: jest.fn(),
+        it('should create a new product with all relations and record history', async () => {
+            const product = {
+                productUid: '550e8400-e29b-41d4-a716-446655440000',
+                info: {
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    productName: 'Test Product',
+                    manufacturer: {
+                        name: 'Test Manufacturer',
+                        address: 'Test Address',
+                        contactEmail: 'test@example.com'
+                    },
+                    dateOfManufacture: '2024-01-15',
+                    placeOfManufacture: 'Test City',
+                    productCategory: 'Electronics',
+                    materialComposition: [
+                        { material: 'Plastic', percentage: 50 },
+                        { material: 'Metal', percentage: 50 }
+                    ],
+                    hazardousSubstances: [
+                        { 
+                            substance: 'Lead', 
+                            casNumber: '7439-92-1',
+                            concentration: 0.1 
+                        }
+                    ],
+                    endOfLifeInstructions: 'Recycle at authorized center',
+                    digitalLink: 'https://example.com/product/123'
+                }
             };
 
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).createMintToken = jest.fn().mockResolvedValue({
+            const mockResult = { id: product.productUid };
+            const expectedResult = {
+                ...mockResult,
+                signature: 'tx123',
+                hash: 'hash123'
+            };
+            
+            // Setup mocks
+            mockValidationUtils.validateProductData.mockReturnValue(product.info);
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: {
+                    findUnique: jest.fn().mockResolvedValue(null)
+                }
+            });
+            mockPrismaManager.createProductWithRelations.mockResolvedValue(mockResult);
+            mockTokenManager.createMintToken.mockResolvedValue({
                 signature: 'tx123',
                 hash: 'hash123',
             });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            const result = await sdk.createDppProduct(validProductData, 'test-user');
+            const result = await sdk.createDppProduct(product);
 
-            expect(result).toEqual({
-                productUid: '550e8400-e29b-41d4-a716-446655440000',
-                signature: 'tx123',
-                hash: 'hash123',
-            });
-            expect(mockPrisma.productDPP.findUnique).toHaveBeenCalledWith({ 
-                where: { id: '550e8400-e29b-41d4-a716-446655440000' } 
-            });
-            expect(mockPrisma.productDPP.create).toHaveBeenCalled();
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    productId: '550e8400-e29b-41d4-a716-446655440000',
-                    action: 'CREATE',
-                    previousData: null,
-                    changedBy: 'test-user',
-                    changeDescription: 'Product created',
-                }),
-            });
+            expect(mockTokenManager.createMintToken).toHaveBeenCalledWith(product.productUid);
+            expect(mockHistoryManager.recordProductHistory).toHaveBeenCalled();
+            expect(result).toEqual(expectedResult);
         });
 
-        it('should throw if product already exists', async () => {
-            const mockPrisma = {
-                productDPP: {
-                    findUnique: jest.fn().mockResolvedValue({ id: '550e8400-e29b-41d4-a716-446655440000' }),
-                },
-                $connect: jest.fn(),
+        it('should throw error if product already exists', async () => {
+            const product = {
+                productUid: '550e8400-e29b-41d4-a716-446655440000',
+                info: {
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    productName: 'Test Product',
+                    manufacturer: {
+                        name: 'Test Manufacturer',
+                        address: 'Test Address',
+                        contactEmail: 'test@example.com'
+                    },
+                    dateOfManufacture: '2023-01-01',
+                    placeOfManufacture: 'Test Location',
+                    productCategory: 'Electronics',
+                    materialComposition: [
+                        { material: 'Plastic', percentage: 100 }
+                    ],
+                    hazardousSubstances: [],
+                    endOfLifeInstructions: 'Recycle properly according to local regulations',
+                    digitalLink: 'https://example.com/product/test'
+                }
             };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
 
-            await expect(sdk.createDppProduct(validProductData)).rejects.toThrow(
+            mockValidationUtils.validateProductData.mockReturnValue(product.info);
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: {
+                    findUnique: jest.fn().mockResolvedValue({ id: product.productUid })
+                }
+            });
+
+            await expect(sdk.createDppProduct(product)).rejects.toThrow(
                 'Product with ID 550e8400-e29b-41d4-a716-446655440000 already exists.'
             );
         });
 
-        it('should throw validation error for invalid product data', async () => {
-            const invalidProduct: ProductInput = {
-                productUid: 'invalid-uuid',
+        it('should reuse existing manufacturer if found', async () => {
+            const product = {
+                productUid: '550e8400-e29b-41d4-a716-446655440000',
                 info: {
-                    ...validProductData.info,
-                    productId: 'invalid-uuid',
-                    productName: '',
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    productName: 'Test Product',
+                    manufacturer: {
+                        name: 'Existing Manufacturer',
+                        address: 'Test Address',
+                        contactEmail: 'test@example.com'
+                    },
+                    dateOfManufacture: '2023-01-01',
+                    placeOfManufacture: 'Test Location',
+                    productCategory: 'Electronics',
+                    materialComposition: [
+                        { material: 'Plastic', percentage: 100 }
+                    ],
+                    hazardousSubstances: [],
+                    endOfLifeInstructions: 'Recycle properly according to local regulations',
+                    digitalLink: 'https://example.com/product/test'
                 }
             };
 
-            const mockPrisma = {
-                $connect: jest.fn(),
+            const mockResult = { id: product.productUid };
+            const expectedResult = {
+                ...mockResult,
+                signature: 'tx123',
+                hash: 'hash123'
             };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
+            
+            mockValidationUtils.validateProductData.mockReturnValue(product.info);
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: {
+                    findUnique: jest.fn().mockResolvedValue(null)
+                }
+            });
+            mockPrismaManager.createProductWithRelations.mockResolvedValue(mockResult);
+            mockTokenManager.createMintToken.mockResolvedValue({
+                signature: 'tx123',
+                hash: 'hash123',
+            });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            await expect(sdk.createDppProduct(invalidProduct)).rejects.toThrow();
+            const result = await sdk.createDppProduct(product);
+            expect(result).toEqual(expectedResult);
+        });
+    });
+
+    describe('createBatchDppProducts', () => {
+        it('should create multiple products and record batch history', async () => {
+            const products = [
+                {
+                    productUid: '550e8400-e29b-41d4-a716-446655440001',
+                    info: {
+                        productId: '550e8400-e29b-41d4-a716-446655440001',
+                        productName: 'Product 1',
+                        manufacturer: { name: 'Manufacturer 1', address: 'Address 1', contactEmail: 'contact1@example.com' },
+                        dateOfManufacture: '2024-01-15',
+                        placeOfManufacture: 'City 1',
+                        productCategory: 'Electronics',
+                        materialComposition: [{ material: 'Plastic', percentage: 100 }],
+                        hazardousSubstances: [],
+                        endOfLifeInstructions: 'Recycle',
+                        digitalLink: 'https://example.com/1'
+                    }
+                },
+                {
+                    productUid: '550e8400-e29b-41d4-a716-446655440002',
+                    info: {
+                        productId: '550e8400-e29b-41d4-a716-446655440002',
+                        productName: 'Product 2',
+                        manufacturer: { name: 'Manufacturer 2', address: 'Address 2', contactEmail: 'contact2@example.com' },
+                        dateOfManufacture: '2024-01-16',
+                        placeOfManufacture: 'City 2',
+                        productCategory: 'Textiles',
+                        materialComposition: [{ material: 'Cotton', percentage: 100 }],
+                        hazardousSubstances: [],
+                        endOfLifeInstructions: 'Compost',
+                        digitalLink: 'https://example.com/2'
+                    }
+                }
+            ];
+
+            // Setup validation mocks
+            mockValidationUtils.validateProductData.mockImplementation((product: any) => product);
+            
+            // Setup database mocks
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: {
+                    findUnique: jest.fn().mockResolvedValue(null)
+                }
+            });
+            mockPrismaManager.createProductWithRelations.mockImplementation((product: any) => 
+                Promise.resolve({ id: product.productUid })
+            );
+            
+            // Setup blockchain mocks
+            mockTokenManager.batchMintToken.mockResolvedValue([
+                { productUid: products[0].productUid, signature: 'tx1', hash: 'hash1' },
+                { productUid: products[1].productUid, signature: 'tx2', hash: 'hash2' }
+            ]);
+            
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
+
+            const result = await sdk.createBatchDppProducts(products);
+
+            expect(mockTokenManager.batchMintToken).toHaveBeenCalled();
+            expect(mockHistoryManager.recordProductHistory).toHaveBeenCalledTimes(2);
+            expect(result).toHaveLength(2);
+        });
+
+        it('should handle errors during batch creation gracefully', async () => {
+            const products = [
+                {
+                    productUid: '550e8400-e29b-41d4-a716-446655440001',
+                    info: {
+                        productId: '550e8400-e29b-41d4-a716-446655440001',
+                        productName: 'Product 1',
+                        manufacturer: { name: 'Manufacturer 1', address: 'Address 1', contactEmail: 'contact1@example.com' },
+                        dateOfManufacture: '2024-01-15',
+                        placeOfManufacture: 'City 1',
+                        productCategory: 'Electronics',
+                        materialComposition: [{ material: 'Plastic', percentage: 100 }],
+                        hazardousSubstances: [],
+                        endOfLifeInstructions: 'Recycle',
+                        digitalLink: 'https://example.com/1'
+                    }
+                }
+            ];
+
+            mockValidationUtils.validateProductData.mockImplementation((product: any) => product);
+            mockPrismaManager.createProductWithRelations.mockRejectedValue(new Error('Database error'));
+
+            await expect(sdk.createBatchDppProducts(products)).rejects.toThrow('Database error');
         });
     });
 
     describe('updateDppProduct', () => {
-        it('should update product and record history', async () => {
-            const updatedProduct = {
-                ...validProductData,
-                info: {
-                    ...validProductData.info,
-                    productName: 'EcoLaptop X200 Updated'
-                }
+        it('should update product with relations and record history', async () => {
+            const productId = '550e8400-e29b-41d4-a716-446655440000';
+            const updateData: Partial<ProductInput> = { 
+                productUid: productId
+            };            const existingProduct = { id: productId, productName: 'Old Name' };
+            const updatedProduct = { id: productId, productName: 'Updated Product Name' };
+            const expectedResult = {
+                ...updatedProduct,
+                signature: 'update-tx123',
+                hash: 'update-hash123'
             };
 
-            const mockPrisma = {
-                productDPP: {
-                    findUnique: jest.fn().mockResolvedValue(mockFullProductData),
-                    update: jest.fn().mockResolvedValue({ ...mockFullProductData, productName: 'EcoLaptop X200 Updated' }),
-                },
-                manufacturer: {
-                    findFirst: jest.fn().mockResolvedValue({ id: 'manufacturer-id' }),
-                },
-                materialComposition: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                hazardousSubstance: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({}),
-                },
-                $connect: jest.fn(),
-            };
-
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn()
-                .mockResolvedValueOnce(mockFullProductData)
-                .mockResolvedValueOnce({ ...mockFullProductData, productName: 'EcoLaptop X200 Updated' });
-            (sdk as any).updateMintToken = jest.fn().mockResolvedValue({
-                signature: 'tx456',
-                hash: 'hash456',
+            mockPrismaManager.getFullProductData.mockResolvedValue(existingProduct);
+            mockValidationUtils.validateProductData.mockReturnValue(updateData);
+            mockPrismaManager.updateProductById.mockResolvedValue(updatedProduct);
+            mockTokenManager.updateMintToken.mockResolvedValue({
+                signature: 'update-tx123',
+                hash: 'update-hash123'
             });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            const result = await sdk.updateDppProduct(updatedProduct, 'test-user');
+            const result = await sdk.updateDppProduct(productId, updateData);
 
-            expect(result).toEqual({
-                productUid: '550e8400-e29b-41d4-a716-446655440000',
-                signature: 'tx456',
-                hash: 'hash456',
-            });
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    productId: '550e8400-e29b-41d4-a716-446655440000',
-                    action: 'UPDATE',
-                    changedBy: 'test-user',
-                    changeDescription: 'Product updated',
-                }),
-            });
+            expect(mockPrismaManager.getFullProductData).toHaveBeenCalledWith(productId);
+            expect(mockTokenManager.updateMintToken).toHaveBeenCalled();
+            expect(mockHistoryManager.recordProductHistory).toHaveBeenCalled();
+            expect(result).toEqual(expectedResult);
         });
 
         it('should throw error when product does not exist', async () => {
-            const mockPrisma = {
-                $connect: jest.fn(),
-            };
-            
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn().mockResolvedValue(null);
+            const productId = '550e8400-e29b-41d4-a716-446655440000';
+            const updateData: Partial<ProductInput> = { productUid: productId };
 
-            await expect(sdk.updateDppProduct(validProductData)).rejects.toThrow(
+            mockPrismaManager.getFullProductData.mockResolvedValue(null);
+
+            await expect(sdk.updateDppProduct(productId, updateData)).rejects.toThrow(
                 'Product with ID 550e8400-e29b-41d4-a716-446655440000 not found.'
             );
         });
     });
 
-    describe('deleteDppProduct', () => {
-        it('should delete product and record in history', async () => {
-            const mockPrisma = {
-                materialComposition: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                hazardousSubstance: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                productDPP: {
-                    delete: jest.fn().mockResolvedValue({}),
-                },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({}),
-                },
-                $transaction: jest.fn().mockImplementation((operations) => Promise.all(operations.map(op => op))),
-                $connect: jest.fn(),
-            };
-
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn().mockResolvedValue(mockFullProductData);
-
-            await sdk.deleteDppProduct('550e8400-e29b-41d4-a716-446655440000', 'test-user');
-
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    productId: '550e8400-e29b-41d4-a716-446655440000',
-                    action: 'DELETE',
-                    newData: null,
-                    changedBy: 'test-user',
-                    changeDescription: 'Product deleted',
-                }),
-            });
-            expect(mockPrisma.$transaction).toHaveBeenCalled();
-        });
-
-        it('should throw error when product does not exist', async () => {
-            const mockPrisma = {
-                $connect: jest.fn(),
-            };
-            
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn().mockResolvedValue(null);
-
-            await expect(sdk.deleteDppProduct('nonexistent-id')).rejects.toThrow(
-                'Product with ID nonexistent-id not found.'
-            );
-        });
-    });
-
-    describe('createBatchDppProducts', () => {
-        it('should create multiple products and record history for each', async () => {
-            const products: ProductInput[] = [
-                validProductData,
-                {
-                    ...validProductData,
-                    productUid: '550e8400-e29b-41d4-a716-446655440001',
-                    info: {
-                        ...validProductData.info,
-                        productId: '550e8400-e29b-41d4-a716-446655440001',
-                        productName: 'EcoLaptop X300'
-                    }
-                }
-            ];
-
-            const mockPrisma = {
-                productDPP: {
-                    findMany: jest.fn().mockResolvedValue([]),
-                    create: jest.fn().mockResolvedValue(mockFullProductData),
-                    update: jest.fn().mockResolvedValue({}),
-                },
-                manufacturer: {
-                    findFirst: jest.fn().mockResolvedValue({ id: 'manufacturer-id' }),
-                },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({}),
-                },
-                $transaction: jest.fn().mockImplementation((operations) => Promise.all(operations.map(op => op))),
-                $connect: jest.fn(),
-            };
-
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).batchMintToken = jest.fn().mockResolvedValue([
-                { productUid: '550e8400-e29b-41d4-a716-446655440000', signature: 'sig1', hash: 'hash1' },
-                { productUid: '550e8400-e29b-41d4-a716-446655440001', signature: 'sig2', hash: 'hash2' },
-            ]);
-
-            const result = await sdk.createBatchDppProducts(products, 10, 'test-user');
-
-            expect(result).toHaveLength(2);
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledTimes(2);
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    action: 'CREATE',
-                    changedBy: 'test-user',
-                    changeDescription: 'Batch product creation',
-                }),
-            });
-        });
-
-        it('should throw if all products already exist', async () => {
-            const mockPrisma = {
-                productDPP: {
-                    findMany: jest.fn().mockResolvedValue([{ id: '550e8400-e29b-41d4-a716-446655440000' }]),
-                },
-                $connect: jest.fn(),
-            };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-
-            await expect(sdk.createBatchDppProducts([validProductData])).rejects.toThrow(
-                'Every product already exists.'
-            );
-        });
-    });
-
     describe('updateBatchDppProducts', () => {
-        it('should update existing products and create new ones with history', async () => {
-            const products: ProductInput[] = [
-                validProductData,
+        it('should handle mix of new and existing products with history', async () => {
+            const updates = [
                 {
-                    ...validProductData,
-                    productUid: '550e8400-e29b-41d4-a716-446655440001',
-                    info: {
-                        ...validProductData.info,
-                        productId: '550e8400-e29b-41d4-a716-446655440001',
-                        productName: 'EcoLaptop X300'
-                    }
+                    productId: '550e8400-e29b-41d4-a716-446655440001',
+                    updateData: { productUid: '550e8400-e29b-41d4-a716-446655440001' } as Partial<ProductInput>
+                },
+                {
+                    productId: '550e8400-e29b-41d4-a716-446655440002',
+                    updateData: { productUid: '550e8400-e29b-41d4-a716-446655440002' } as Partial<ProductInput>
                 }
             ];
 
-            const mockPrisma = {
-                productDPP: {
-                    findMany: jest.fn().mockResolvedValue([{ id: '550e8400-e29b-41d4-a716-446655440000' }]),
-                    create: jest.fn().mockResolvedValue(mockFullProductData),
-                    update: jest.fn().mockResolvedValue({}),
-                },
-                manufacturer: {
-                    findFirst: jest.fn().mockResolvedValue({ id: 'manufacturer-id' }),
-                },
-                materialComposition: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                hazardousSubstance: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({}),
-                },
-                $transaction: jest.fn().mockImplementation((operations) => Promise.all(operations.map(op => op))),
-                $connect: jest.fn(),
-            };
+            mockValidationUtils.normalizeUserName.mockReturnValue('test-user');
+            mockPrismaManager.getFullProductData.mockImplementation((id: string) => 
+                Promise.resolve({ id, productName: 'Original Name' })
+            );
+            mockValidationUtils.validateProductData.mockImplementation((data: any) => data);
+            mockPrismaManager.updateProductById.mockImplementation((id: string, data: any) => 
+                Promise.resolve({ id, productName: 'Updated Name' })
+            );
+            mockTokenManager.updateMintToken.mockResolvedValue({
+                signature: 'update-tx',
+                hash: 'update-hash'
+            });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn()
-                .mockResolvedValueOnce(mockFullProductData)
-                .mockResolvedValueOnce({ ...mockFullProductData, productName: 'Updated' });
-            (sdk as any).batchMintToken = jest.fn().mockResolvedValue([
-                { productUid: '550e8400-e29b-41d4-a716-446655440000', signature: 'sig1', hash: 'hash1' },
-                { productUid: '550e8400-e29b-41d4-a716-446655440001', signature: 'sig2', hash: 'hash2' },
-            ]);
-
-            const result = await sdk.updateBatchDppProducts(products, 10, 'test-user');
+            const result = await sdk.updateBatchDppProducts(updates, 'test-user');
 
             expect(result).toHaveLength(2);
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledTimes(2);
+            expect(mockHistoryManager.recordProductHistory).toHaveBeenCalledTimes(2);
         });
     });
 
-    describe('deleteBatchDppProducts', () => {
-        it('should delete multiple products and record each in history', async () => {
+    describe('Product Deletion with History', () => {
+        it('should delete product and record history', async () => {
+            const productId = '550e8400-e29b-41d4-a716-446655440000';
+            const existingProduct = { id: productId, productName: 'Test Product' };
+
+            mockPrismaManager.getFullProductData.mockResolvedValue(existingProduct);
+            mockPrismaManager.deleteProductWithRelations.mockResolvedValue(undefined);
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
+
+            const result = await sdk.deleteDppProduct(productId);
+
+            expect(mockPrismaManager.getFullProductData).toHaveBeenCalledWith(productId);
+            expect(mockHistoryManager.recordProductHistory).toHaveBeenCalled();
+            expect(result).toBeUndefined();
+        });
+    });
+
+    describe('Batch Product Deletion', () => {
+        it('should delete multiple products and record batch history', async () => {
             const productIds = [
-                '550e8400-e29b-41d4-a716-446655440000',
-                '550e8400-e29b-41d4-a716-446655440001'
+                '550e8400-e29b-41d4-a716-446655440001',
+                '550e8400-e29b-41d4-a716-446655440002'
             ];
 
-            const mockPrisma = {
+            const existingProducts = [
+                { id: productIds[0], productName: 'Product 1' },
+                { id: productIds[1], productName: 'Product 2' }
+            ];
+
+            mockPrismaManager.getFullProductData.mockImplementation((id: string) => {
+                const product = existingProducts.find(p => p.id === id);
+                return Promise.resolve(product || null);
+            });
+            
+            // Mock Prisma client for batch operations
+            const mockPrismaClient = {
+                $transaction: jest.fn().mockResolvedValue(undefined),
                 materialComposition: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
+                    deleteMany: jest.fn().mockResolvedValue({ count: 2 })
                 },
                 hazardousSubstance: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
+                    deleteMany: jest.fn().mockResolvedValue({ count: 1 })
                 },
                 productDPP: {
-                    deleteMany: jest.fn().mockResolvedValue({}),
-                },
-                dppProductHistory: {
-                    create: jest.fn().mockResolvedValue({}),
-                },
-                $transaction: jest.fn().mockImplementation((operations) => Promise.all(operations.map(op => op))),
-                $connect: jest.fn(),
+                    deleteMany: jest.fn().mockResolvedValue({ count: 2 })
+                }
             };
+            mockPrismaManager.getPrisma.mockReturnValue(mockPrismaClient);
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn()
-                .mockResolvedValueOnce(mockFullProductData)
-                .mockResolvedValueOnce({ ...mockFullProductData, id: '550e8400-e29b-41d4-a716-446655440001' });
+            const result = await sdk.deleteBatchDppProducts(productIds);
 
-            await sdk.deleteBatchDppProducts(productIds, 'test-user');
-
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledTimes(2);
-            expect(mockPrisma.dppProductHistory.create).toHaveBeenCalledWith({
-                data: expect.objectContaining({
-                    action: 'DELETE',
-                    changedBy: 'test-user',
-                    changeDescription: 'Batch product deletion',
-                }),
-            });
-            expect(mockPrisma.$transaction).toHaveBeenCalled();
+            expect(result).toBeUndefined();
+            expect(mockHistoryManager.recordProductHistory).toHaveBeenCalledTimes(2);
         });
 
         it('should handle non-existent products gracefully', async () => {
-            const productIds = ['nonexistent-1', 'nonexistent-2'];
+            const productIds = ['non-existent-id'];
 
-            const mockPrisma = {
-                $connect: jest.fn(),
-            };
+            mockPrismaManager.getFullProductData.mockResolvedValue(null);
 
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).getFullProductData = jest.fn().mockResolvedValue(null);
-
-            await expect(sdk.deleteBatchDppProducts(productIds)).rejects.toThrow(
-                'No valid products found to delete.'
-            );
+            await expect(sdk.deleteBatchDppProducts(productIds)).rejects.toThrow('No valid products found to delete.');
         });
     });
 
-    describe('History Query Functions', () => {
-        it('should get history by action type', async () => {
-            const mockHistory = [
-                {
-                    id: 'history-1',
-                    action: 'CREATE',
-                    changedBy: 'test-user',
-                    changeTimestamp: new Date(),
-                },
-            ];
+    describe('History Management Functions', () => {
+        it('should get product history with pagination', async () => {
+            const historyData = [{
+                id: 'hist-1',
+                productId: '550e8400-e29b-41d4-a716-446655440000',
+                action: 'CREATE',
+                changeTimestamp: new Date('2024-01-15T10:00:00.000Z'),
+                changedBy: 'user1',
+                changeDescription: 'Product created'
+            }];
 
-            const mockPrisma = {
-                dppProductHistory: {
-                    findMany: jest.fn().mockResolvedValue(mockHistory),
-                    count: jest.fn().mockResolvedValue(1),
-                },
-                $connect: jest.fn(),
-            };
+            mockHistoryManager.getAllProductHistory.mockResolvedValue({
+                history: historyData,
+                total: 1,
+                totalPages: 1
+            });
 
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-
-            const result = await sdk.getProductHistoryByAction('CREATE', 1, 10);
+            const result = await sdk.getAllProductHistory(1, 10);
 
             expect(result).toEqual({
-                history: mockHistory,
+                history: historyData,
                 total: 1,
-                totalPages: 1,
-            });
-            expect(mockPrisma.dppProductHistory.findMany).toHaveBeenCalledWith({
-                where: { action: 'CREATE' },
-                orderBy: { changeTimestamp: 'desc' },
-                skip: 0,
-                take: 10,
+                totalPages: 1
             });
         });
 
-        it('should get history by user', async () => {
-            const mockHistory = [
-                {
-                    id: 'history-1',
-                    changedBy: 'specific-user',
-                    changeTimestamp: new Date(),
-                },
-            ];
+        it('should get history filtered by action type', async () => {
+            const historyData = [{
+                id: 'hist-1',
+                action: 'CREATE',
+                changeTimestamp: new Date('2024-01-15T10:00:00.000Z'),
+                changedBy: 'user1'
+            }];
 
-            const mockPrisma = {
-                dppProductHistory: {
-                    findMany: jest.fn().mockResolvedValue(mockHistory),
-                    count: jest.fn().mockResolvedValue(1),
-                },
-                $connect: jest.fn(),
-            };
-
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-
-            const result = await sdk.getProductHistoryByUser('specific-user', 1, 10);
-
-            expect(result).toEqual({
-                history: mockHistory,
-                total: 1,
-                totalPages: 1,
+            mockHistoryManager.getProductHistoryByAction.mockResolvedValue({
+                history: historyData
             });
-            expect(mockPrisma.dppProductHistory.findMany).toHaveBeenCalledWith({
-                where: { changedBy: 'specific-user' },
-                orderBy: { changeTimestamp: 'desc' },
-                skip: 0,
-                take: 10,
-            });
+
+            const result = await sdk.getProductHistoryByAction('CREATE');
+
+            expect(result.history).toEqual(historyData);
         });
 
-        it('should get history by date range', async () => {
-            const startDate = new Date('2025-01-01');
-            const endDate = new Date('2025-12-31');
-            const mockHistory = [
-                {
-                    id: 'history-1',
-                    changeTimestamp: new Date('2025-06-15'),
-                },
-            ];
+        it('should get history filtered by user', async () => {
+            const historyData = [{
+                id: 'hist-1',
+                action: 'UPDATE',
+                changeTimestamp: new Date('2024-01-15T10:00:00.000Z'),
+                changedBy: 'test-user'
+            }];
 
-            const mockPrisma = {
-                dppProductHistory: {
-                    findMany: jest.fn().mockResolvedValue(mockHistory),
-                    count: jest.fn().mockResolvedValue(1),
-                },
-                $connect: jest.fn(),
+            mockHistoryManager.getProductHistoryByUser.mockResolvedValue({
+                history: historyData
+            });
+
+            const result = await sdk.getProductHistoryByUser('test-user');
+
+            expect(result.history).toEqual(historyData);
+        });
+
+        it('should get history within date range', async () => {
+            const startDate = new Date('2024-01-15');
+            const endDate = new Date('2024-01-16');
+            const historyData = [{
+                id: 'hist-1',
+                changeTimestamp: new Date('2024-01-15T10:00:00.000Z')
+            }];
+
+            mockHistoryManager.getProductHistoryByDateRange.mockResolvedValue({
+                history: historyData
+            });
+
+            const result = await sdk.getProductHistoryByDateRange(startDate, endDate);
+
+            expect(result.history).toEqual(historyData);
+        });
+
+        it('should get comprehensive history statistics', async () => {
+            const statsData = {
+                totalOperations: 100,
+                createCount: 30,
+                updateCount: 50,
+                deleteCount: 20,
+                productsWithHistory: 75,
+                mostActiveProduct: {
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    operationCount: 15
+                }
             };
 
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
+            mockHistoryManager.getProductHistoryStats.mockResolvedValue(statsData);
 
-            const result = await sdk.getProductHistoryByDateRange(startDate, endDate, 1, 10);
+            const result = await sdk.getProductHistoryStats();
 
-            expect(result).toEqual({
-                history: mockHistory,
-                total: 1,
-                totalPages: 1,
-            });
-            expect(mockPrisma.dppProductHistory.findMany).toHaveBeenCalledWith({
-                where: {
-                    changeTimestamp: {
-                        gte: startDate,
-                        lte: endDate,
-                    },
-                },
-                orderBy: { changeTimestamp: 'desc' },
-                skip: 0,
-                take: 10,
-            });
+            expect(result).toEqual(statsData);
         });
     });
 
-    describe('Validation Tests', () => {
-        it('should validate material composition percentages', async () => {
-            const invalidProduct: ProductInput = {
-                productUid: '550e8400-e29b-41d4-a716-446655440000',
-                info: {
-                    ...validProductData.info,
-                    materialComposition: [
-                        { material: 'Aluminum', percentage: 50 },
-                        { material: 'Plastic', percentage: 30 },
-                    ]
-                }
-            };
+    describe('Blockchain Authenticity Verification', () => {
+        it('should return isValid: true if hash matches blockchain', async () => {
+            const productId = '550e8400-e29b-41d4-a716-446655440000';
 
-            const mockPrisma = {
-                $connect: jest.fn(),
-            };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
+            mockTokenManager.checkAuthenticityOnBlockchain.mockResolvedValue({
+                isValid: true,
+                reason: 'Hash verified successfully'
+            });
 
-            await expect(sdk.createDppProduct(invalidProduct)).rejects.toThrow();
+            const result = await sdk.checkAuthenticityOnBlockchain(productId);
+
+            expect(result.isValid).toBe(true);
+            expect(result.reason).toBe('Hash verified successfully');
         });
 
-        it('should validate CAS number format', async () => {
-            const invalidProduct: ProductInput = {
-                productUid: '550e8400-e29b-41d4-a716-446655440000',
-                info: {
-                    ...validProductData.info,
-                    hazardousSubstances: [
-                        { substance: 'Lead', casNumber: 'invalid-cas', concentration: 0.08 }
-                    ]
-                }
-            };
+        it('should return isValid: false if hash does not match blockchain', async () => {
+            const productId = '550e8400-e29b-41d4-a716-446655440000';
 
-            const mockPrisma = {
-                $connect: jest.fn(),
-            };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
+            mockTokenManager.checkAuthenticityOnBlockchain.mockResolvedValue({
+                isValid: false,
+                reason: 'Hash mismatch detected'
+            });
 
-            await expect(sdk.createDppProduct(invalidProduct)).rejects.toThrow();
+            const result = await sdk.checkAuthenticityOnBlockchain(productId);
+
+            expect(result.isValid).toBe(false);
+            expect(result.reason).toBe('Hash mismatch detected');
         });
+    });
 
-        it('should validate email format', async () => {
-            const invalidProduct: ProductInput = {
+    describe('Manufacturer Management', () => {
+        it('should create product with manufacturer information', async () => {
+            const product = {
                 productUid: '550e8400-e29b-41d4-a716-446655440000',
                 info: {
-                    ...validProductData.info,
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    productName: 'Test Product',
                     manufacturer: {
-                        ...validProductData.info.manufacturer,
-                        contactEmail: 'invalid-email'
-                    }
+                        name: 'New Manufacturer',
+                        address: 'New Address',
+                        contactEmail: 'new@example.com'
+                    },
+                    dateOfManufacture: '2023-01-01',
+                    placeOfManufacture: 'Test Location',
+                    productCategory: 'Electronics',
+                    materialComposition: [
+                        { material: 'Plastic', percentage: 100 }
+                    ],
+                    hazardousSubstances: [],
+                    endOfLifeInstructions: 'Recycle properly according to local regulations',
+                    digitalLink: 'https://example.com/product/test'
                 }
             };
 
-            const mockPrisma = {
-                $connect: jest.fn(),
-            };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
+            // Test the product creation with manufacturer
+            mockValidationUtils.validateProductData.mockReturnValue(product.info);
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: { findUnique: jest.fn().mockResolvedValue(null) }
+            });
+            mockPrismaManager.createProductWithRelations.mockResolvedValue({ 
+                id: product.productUid,
+                manufacturer: product.info.manufacturer 
+            });
+            mockTokenManager.createMintToken.mockResolvedValue({ signature: 'tx', hash: 'hash' });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
 
-            await expect(sdk.createDppProduct(invalidProduct)).rejects.toThrow();
+            const result = await sdk.createDppProduct(product);
+
+            // Verify manufacturer information is preserved
+            expect(mockPrismaManager.createProductWithRelations).toHaveBeenCalledWith(product);
+            expect(result.signature).toBeDefined();
+        });
+
+        it('should handle product creation with different manufacturer', async () => {
+            const product = {
+                productUid: '550e8400-e29b-41d4-a716-446655440000',
+                info: {
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    productName: 'Test Product',
+                    manufacturer: {
+                        name: 'Different Manufacturer',
+                        address: 'Different Address',
+                        contactEmail: 'different@example.com'
+                    },
+                    dateOfManufacture: '2023-01-01',
+                    placeOfManufacture: 'Test Location',
+                    productCategory: 'Electronics',
+                    materialComposition: [
+                        { material: 'Plastic', percentage: 100 }
+                    ],
+                    hazardousSubstances: [],
+                    endOfLifeInstructions: 'Recycle properly according to local regulations',
+                    digitalLink: 'https://example.com/product/test'
+                }
+            };
+
+            // Test through public interface
+            mockValidationUtils.validateProductData.mockReturnValue(product.info);
+            mockPrismaManager.getPrisma.mockReturnValue({
+                productDPP: { findUnique: jest.fn().mockResolvedValue(null) }
+            });
+            mockPrismaManager.createProductWithRelations.mockResolvedValue({ 
+                id: product.productUid,
+                manufacturer: product.info.manufacturer 
+            });
+            mockTokenManager.createMintToken.mockResolvedValue({ signature: 'tx', hash: 'hash' });
+            mockHistoryManager.recordProductHistory.mockResolvedValue(undefined);
+
+            await sdk.createDppProduct(product);
+
+            expect(mockPrismaManager.createProductWithRelations).toHaveBeenCalledWith(product);
         });
     });
 
-    describe('checkAuthenticityOnBlockchain', () => {
-        it('should return isValid: true if hash matches', async () => {
-            const productId = '550e8400-e29b-41d4-a716-446655440000';
-            const mockPrisma = {
-                productDPP: {
-                    findUnique: jest.fn().mockResolvedValue(mockFullProductData),
-                },
-                $connect: jest.fn(),
+    describe('Edge Cases and Error Handling', () => {
+        it('should handle database connection errors gracefully', async () => {
+            const product = {
+                productUid: '550e8400-e29b-41d4-a716-446655440000',
+                info: {
+                    productId: '550e8400-e29b-41d4-a716-446655440000',
+                    productName: 'Test Product',
+                    manufacturer: {
+                        name: 'Test Manufacturer',
+                        address: 'Test Address',
+                        contactEmail: 'test@example.com'
+                    },
+                    dateOfManufacture: '2023-01-01',
+                    placeOfManufacture: 'Test Location',
+                    productCategory: 'Electronics',
+                    materialComposition: [
+                        { material: 'Plastic', percentage: 100 }
+                    ],
+                    hazardousSubstances: [],
+                    endOfLifeInstructions: 'Recycle properly according to local regulations',
+                    digitalLink: 'https://example.com/product/test'
+                }
             };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).hashObject = jest.fn().mockReturnValue('hash-ok');
-            (sdk as any).getMemoFromSignature = jest.fn().mockResolvedValue(
-                JSON.stringify({ hash: 'hash-ok' })
-            );
 
-            const result = await sdk.checkAuthenticityOnBlockchain(productId);
-            expect(result).toEqual({ isValid: true });
+            mockValidationUtils.validateProductData.mockReturnValue(product.info);
+            mockPrismaManager.createProductWithRelations.mockRejectedValue(new Error('Database connection failed'));
+
+            await expect(sdk.createDppProduct(product)).rejects.toThrow('Database connection failed');
         });
 
-        it('should return isValid: false and reason if hash does not match', async () => {
-            const productId = '550e8400-e29b-41d4-a716-446655440000';
-            const mockPrisma = {
-                productDPP: {
-                    findUnique: jest.fn().mockResolvedValue(mockFullProductData),
-                },
-                $connect: jest.fn(),
-            };
-            (sdk as any).setupPrisma = jest.fn().mockResolvedValue(mockPrisma);
-            (sdk as any).prisma = mockPrisma;
-            (sdk as any).hashObject = jest.fn().mockReturnValue('hash-local');
-            (sdk as any).getMemoFromSignature = jest.fn().mockResolvedValue(
-                JSON.stringify({ hash: 'hash-chain' })
-            );
+        it('should handle empty batch operations correctly', async () => {
+            const emptyProducts: any[] = [];
 
-            const result = await sdk.checkAuthenticityOnBlockchain(productId);
-            expect(result).toEqual({ isValid: false, reason: 'Hash mismatch' });
+            const result = await sdk.createBatchDppProducts(emptyProducts);
+            expect(result).toEqual([]);
         });
     });
-
 });

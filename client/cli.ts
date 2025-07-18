@@ -1,16 +1,15 @@
 import readline from "node:readline";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Connection } from "@solana/web3.js";
 import { ProductInput, SafeoutSDK } from "./class_safeout";
 
 /* -------------------------------------------------------------------------- */
 /*  Instance SDK (adapté à ton réseau + clés)                                 */
 /* -------------------------------------------------------------------------- */
+const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 const sdk = new SafeoutSDK(
-  "Devnet",
-  "sha256",
+  connection,
   new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1"),
-  new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ"),
-  "postgresql://safeout:pide@localhost:4242/sdk-1?schema=public"
+  new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ")
 );
 /* -------------------------------------------------------------------------- */
 /*  Helpers I/O                                                               */
@@ -160,7 +159,7 @@ async function mainLoop() {
           const json = await ask("New metadata (JSON) : ");
           const info = JSON.parse(json);
           const changedBy = await ask("Changed by (optional, press Enter for 'cli-user') : ");
-          console.log(await sdk.updateDppProduct({ productUid: id, info }, changedBy || 'cli-user'));
+          console.log(await sdk.updateDppProduct(id, info, changedBy || 'cli-user'));
           break;
         }
         case "delete": {
@@ -182,18 +181,21 @@ async function mainLoop() {
         }
         case "batch-create": {
           const changedBy = await ask("Changed by (optional, press Enter for 'cli-user') : ");
-          console.log(await sdk.createBatchDppProducts(demoProducts, 10, changedBy || 'cli-user'));
+          console.log(await sdk.createBatchDppProducts(demoProducts, changedBy || 'cli-user'));
           break;
         }
         case "batch-update": {
           const updated = demoProducts.map((p, i) => ({
-            productUid: p.productUid,
-            info: {
-              ...p.info,
+            productId: p.productUid,
+            updateData: {
+              productUid: p.productUid,
+              info: {
+                ...p.info,
+              },
             },
           }));
           const changedBy = await ask("Changed by (optional, press Enter for 'cli-user') : ");
-          console.log(await sdk.updateBatchDppProducts(updated, 10, changedBy || 'cli-user'));
+          console.log(await sdk.updateBatchDppProducts(updated, changedBy || 'cli-user'));
           break;
         }
         case "batch-delete": {

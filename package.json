@@ -10,7 +10,11 @@
   "scripts": {
     "start": "ts-node mintToken.ts",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:mint": "jest --testNamePattern='Mint Management'",
+    "test:mint:unit": "jest __tests__/SafeoutSDK.mintManagement.test.ts",
+    "test:mint:integration": "jest __tests__/SafeoutSDK.mintManagement.integration.test.ts",
+    "test:user-normalization": "jest __tests__/SafeoutSDK.userNormalization.test.ts"
   },
   "dependencies": {
     "@solana/spl-memo": "^0.2.5",
