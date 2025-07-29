@@ -6,7 +6,6 @@ import {
 } from "@solana/web3.js";
 
 // Internal imports
-import { getPayerKeypair } from "./lib/solanaUtils";
 import { PrismaManager } from "./src/prisma-manager";
 import { ValidationUtils } from "./src/validation";
 import { MintManager } from "./src/mint-manager";
@@ -52,14 +51,14 @@ export class SafeoutSDK {
   /**
    * Initialize the SDK - must be called before using other methods
    */
-  public async init(): Promise<void> {
+  public async init(databaseUrl?: string): Promise<void> {
     try {
-      // Setup Prisma with environment variable
-      const databaseUrl = process.env.DATABASE_URL || "";
-      if (!databaseUrl) {
-        throw new Error("DATABASE_URL environment variable is required");
+      const dbUrl = databaseUrl || process.env.DATABASE_URL;
+      if (!dbUrl) {
+        throw new Error('DATABASE_URL environment variable is required');
       }
-      await this.prismaManager.setupPrisma(databaseUrl);
+      
+      await this.prismaManager.setupPrisma(dbUrl);
       
       // Initialize mint
       this.mint = await this.mintManager.initializeMint();
@@ -274,7 +273,11 @@ export class SafeoutSDK {
         // Validate and update
         let validatedData;
         if (updateData.info) {
-          validatedData = ValidationUtils.validateProductData(updateData.info);
+          const validatedInfo = ValidationUtils.validateProductData(updateData.info);
+          validatedData = {
+            productUid: updateData.productUid || productId,
+            info: validatedInfo
+          };
         } else {
           validatedData = updateData;
         }
@@ -521,6 +524,35 @@ export class SafeoutSDK {
    */
   public normalizeUserName(userName?: string): string {
     return ValidationUtils.normalizeUserName(userName);
+  }
+
+  /**
+   * Updates the visibility data for a product
+   * @param type - The type of data to update: "public", "owner", or "brand"
+   * @param productId - The ID of the product
+   * @param data - The JSON data to set (e.g., ["name", "productName", ...])
+   * @returns The updated visibility record
+   */
+  public async updateProductVisibility(
+    type: "public" | "owner" | "brand", 
+    productId: string, 
+    data: any
+  ): Promise<any> {
+    return this.prismaManager.updateProductVisibility(type, productId, data);
+  }
+
+  /**
+   * Get visibility hashes for a product
+   * @param productId - The ID of the product
+   * @returns Object containing public, owner, and brand hashes
+   */
+  public async getProductVisibilityHashes(
+    productId: string
+  ): Promise<{ publicHash: string; ownerHash: string; brandHash: string }> {
+    if (!this.tokenManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
+    }
+    return (this.tokenManager as any).getVisibilityHashes(productId);
   }
 
   // Testing methods - accessing manager methods for test compatibility

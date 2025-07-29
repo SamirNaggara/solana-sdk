@@ -6,7 +6,9 @@ export type NetworkValue = "Mainnet" | "Testnet" | "Devnet";
 
 /** Runtime‑validated shape of a memo object stored on‑chain */
 export const SignatureSchema = z.object({
-  hash: z.string().min(1, "Hash is required"),
+  public: z.string().min(1, "Public hash is required"),
+  owner: z.string().min(1, "Owner hash is required"),
+  brand: z.string().min(1, "Brand hash is required"),
 });
 
 export type ProductInput = {
@@ -25,6 +27,7 @@ export type CompleteProduct = {
   endOfLifeInstructions: string;
   digitalLink: string;
   signature: string;
+  hash?: string; // Added hash field
   manufacturer: {
     name: string;
     address: string;

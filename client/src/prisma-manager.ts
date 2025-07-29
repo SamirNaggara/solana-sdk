@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
@@ -49,6 +49,7 @@ export class PrismaManager {
       hazardousSubstances   HazardousSubstance[]
       signature             String
       history               DppProductHistory[]
+      extendedData          DppProductVisibility[]
 
       @@map("dpp_products")
     }
@@ -101,6 +102,19 @@ export class PrismaManager {
       @@map("dpp_product_history")
       @@index([productId])
       @@index([changeTimestamp])
+    }
+
+    model DppProductVisibility {
+      id                    String      @id @default(uuid())
+      productId             String      // Column 1: DPP Product reference
+      public                Json?        // Column 2: public
+      owner                 Json?        // Column 3: owner data as JSON
+      brand                 Json?        // Column 4: brand data as JSON
+
+      product               productDPP  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+      @@map("dpp_product_visibility")
+      @@index([productId])
     }
   `;
 
@@ -185,7 +199,7 @@ export class PrismaManager {
 
     const createData = await this.convertToCreateData(productData);
     
-    return await this.prisma.productDPP.create({
+    const createdProduct = await this.prisma.productDPP.create({
       data: createData,
       include: {
         manufacturer: true,
@@ -193,6 +207,29 @@ export class PrismaManager {
         hazardousSubstances: true,
       },
     });
+
+    const brandData = [
+      "id",
+      "productName", 
+      "dateOfManufacture",
+      "placeOfManufacture",
+      "productCategory",
+      "repairabilityScore",
+      "endOfLifeInstructions",
+      "digitalLink",
+      "manufacturerId"
+    ];
+
+    await this.prisma.dppProductVisibility.create({
+      data: {
+        productId: createdProduct.id,
+        public: Prisma.JsonNull,
+        owner: Prisma.JsonNull,
+        brand: brandData
+      }
+    });
+
+    return createdProduct;
   }
 
   /**
@@ -307,17 +344,57 @@ export class PrismaManager {
       throw new Error("Prisma client is not initialized. Call setupPrisma() first.");
     }
 
-    const createData = await this.convertToCreateData(updateData);
+    const updateFormattedData = await this.convertToUpdateData(updateData);
     
     return await this.prisma.productDPP.update({
       where: { id: productId },
-      data: createData,
+      data: updateFormattedData,
       include: {
         manufacturer: true,
         materialComposition: true,
         hazardousSubstances: true,
       },
     });
+  }
+
+  /**
+   * Converts ProductInput to Prisma update data format (preserves existing signature)
+   * @param productInput - ProductInput object containing product data
+   * @returns Prisma update data object
+   */
+  async convertToUpdateData(productInput: ProductInput) {
+    const manufacturerId = await this.createOrFindManufacturer(productInput.info.manufacturer as {
+      name: string;
+      address: string;
+      contactEmail: string;
+    });
+
+    return {
+      productName: productInput.info.productName,
+      dateOfManufacture: new Date(productInput.info.dateOfManufacture),
+      placeOfManufacture: productInput.info.placeOfManufacture,
+      productCategory: productInput.info.productCategory,
+      repairabilityScore: productInput.info.repairabilityScore,
+      endOfLifeInstructions: productInput.info.endOfLifeInstructions,
+      digitalLink: productInput.info.digitalLink,
+      manufacturerId: manufacturerId,
+      // Note: signature is NOT reset to "" during updates
+      materialComposition: {
+        deleteMany: {},
+        create: productInput.info.materialComposition.map(mc => ({
+          material: mc.material,
+          percentage: mc.percentage
+        }))
+      },
+      hazardousSubstances: {
+        deleteMany: {},
+        create: productInput.info.hazardousSubstances.map(hs => ({
+          substance: hs.substance,
+          casNumber: hs.casNumber,
+          concentration: hs.concentration
+        }))
+      }
+    };
   }
 
   /**
@@ -355,6 +432,39 @@ export class PrismaManager {
           }))
         }
       },
+    });
+  }
+
+  /**
+   * Updates the visibility data for a product
+   * @param type - The type of data to update: "public", "owner", or "brand"
+   * @param productId - The ID of the product
+   * @param data - The JSON data to set (e.g., ["name", "productName", ...])
+   * @returns The updated visibility record
+   */
+  async updateProductVisibility(
+    type: "public" | "owner" | "brand", 
+    productId: string, 
+    data: any
+  ): Promise<any> {
+    const prisma = this.getPrisma();
+
+    // Check if visibility record exists for this product
+    const existingVisibility = await prisma.dppProductVisibility.findFirst({
+      where: { productId }
+    });
+
+    if (!existingVisibility) {
+      throw new Error(`No visibility record found for product ID: ${productId}`);
+    }
+
+    // Prepare update data based on type
+    const updateData: any = {};
+    updateData[type] = data;
+
+    return await prisma.dppProductVisibility.update({
+      where: { id: existingVisibility.id },
+      data: updateData
     });
   }
 }

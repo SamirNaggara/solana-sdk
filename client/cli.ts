@@ -8,8 +8,8 @@ import { ProductInput, SafeoutSDK } from "./class_safeout";
 const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 const sdk = new SafeoutSDK(
   connection,
-  new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1"),
-  new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ")
+  new PublicKey(process.env.MINT_AUTHORITY || ""),
+  new PublicKey(process.env.OWNER_PUBLIC_KEY || "")
 );
 /* -------------------------------------------------------------------------- */
 /*  Helpers I/O                                                               */
@@ -19,6 +19,60 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 const ask = (q: string) => new Promise<string>((res) => rl.question(q, res));
+
+/* -------------------------------------------------------------------------- */
+/*  JSON Helper Functions                                                     */
+/* -------------------------------------------------------------------------- */
+function validateAndParseJSON(jsonString: string): { success: boolean; data?: any; error?: string } {
+  try {
+    const data = JSON.parse(jsonString);
+    return { success: true, data };
+  } catch (error) {
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown parsing error'
+    };
+  }
+}
+
+function showJSONExamples() {
+  console.log("\n📋 JSON Format Examples:");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("🔸 Array of field names (common use case):");
+  console.log('   ["productName", "manufacturer", "dateOfManufacture"]');
+  console.log("\n🔸 Object with key-value pairs:");
+  console.log('   {"productName": "EcoLaptop", "category": "Electronics"}');
+  console.log("\n🔸 Visibility fields for public access:");
+  console.log('   ["productName", "productCategory", "materialComposition"]');
+  console.log("\n🔸 Visibility fields for owner access:");
+  console.log('   ["productName", "manufacturer", "repairabilityScore", "endOfLifeInstructions"]');
+  console.log("\n🔸 Visibility fields for brand access:");
+  console.log('   ["productName", "manufacturer", "dateOfManufacture", "placeOfManufacture", "materialComposition", "hazardousSubstances"]');
+  console.log("\n⚠️  Important: Always use double quotes (\") for strings in JSON!");
+  console.log("💡 Tip: Type 'examples' to see field suggestions for each type");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+}
+
+function showVisibilityExamples(type: string) {
+  console.log(`\n📋 Suggested fields for ${type.toUpperCase()} visibility:`);
+  console.log("━".repeat(50));
+  
+  switch (type.toLowerCase()) {
+    case "public":
+      console.log("📢 Public fields (general product info):");
+      console.log('   ["productName", "productCategory", "materialComposition", "repairabilityScore"]');
+      break;
+    case "owner":
+      console.log("👤 Owner fields (detailed user info):");
+      console.log('   ["productName", "manufacturer", "dateOfManufacture", "repairabilityScore", "endOfLifeInstructions", "digitalLink"]');
+      break;
+    case "brand":
+      console.log("🏢 Brand fields (manufacturer info):");
+      console.log('   ["productName", "manufacturer", "dateOfManufacture", "placeOfManufacture", "materialComposition", "hazardousSubstances", "digitalLink"]');
+      break;
+  }
+  console.log("━".repeat(50) + "\n");
+}
 
 /* -------------------------------------------------------------------------- */
 /*  Démo produits                                                             */
@@ -140,10 +194,10 @@ const demoProducts: ProductInput[] = [
 /*  Boucle principale                                                         */
 /* -------------------------------------------------------------------------- */
 async function mainLoop() {
-  await sdk.init();
+  await sdk.init(process.env.DATABASE_URL || "");
   for (; ;) {
     console.log(
-      "\nActions : create | update | delete | check | batch-create | batch-update | batch-delete | history | history-all | history-stats | exit"
+      "\nActions : create | update | delete | check | batch-create | batch-update | batch-delete | history | history-all | history-stats | visibility | exit"
     );
     const action = (await ask("> ")).trim().toLowerCase();
 
@@ -236,6 +290,78 @@ async function mainLoop() {
           console.log(`- Deletes: ${stats.deleteCount}`);
           console.log(`Unique Products: ${stats.uniqueProducts}`);
           console.log(`Unique Users: ${stats.uniqueUsers}`);
+          break;
+        }
+        case "visibility": {
+          const productId = await ask("Product ID : ");
+          const type = await ask("Type (public/owner/brand) : ");
+          
+          if (!["public", "owner", "brand"].includes(type)) {
+            console.log("❌ Invalid type. Must be 'public', 'owner', or 'brand'");
+            break;
+          }
+          
+          showJSONExamples();
+          showVisibilityExamples(type);
+          
+          let jsonData: string;
+          let parseResult: { success: boolean; data?: any; error?: string } = { success: false };
+          let attempts = 0;
+          const maxAttempts = 3;
+          
+          do {
+            attempts++;
+            jsonData = await ask(`📝 Enter JSON data (attempt ${attempts}/${maxAttempts}) : `);
+            
+            // Handle some common cases where users might forget quotes
+            if (jsonData.trim() === 'cancel' || jsonData.trim() === 'exit') {
+              console.log("Operation cancelled.");
+              break;
+            }
+            
+            if (jsonData.trim() === 'examples') {
+              showVisibilityExamples(type);
+              attempts--; // Don't count this as an attempt
+              continue;
+            }
+            
+            parseResult = validateAndParseJSON(jsonData);
+            
+            if (parseResult.success) {
+              console.log("✅ Valid JSON parsed:");
+              console.log(JSON.stringify(parseResult.data, null, 2));
+              
+              const confirmChoice = await ask("Continue with this data? (y/n) : ");
+              if (confirmChoice.toLowerCase() === 'y') {
+                try {
+                  const result = await sdk.updateProductVisibility(type as "public" | "owner" | "brand", productId, parseResult.data);
+                  console.log("🎉 Visibility updated successfully:");
+                  console.log(JSON.stringify(result, null, 2));
+                } catch (sdkError) {
+                  console.error("❌ SDK Error:", (sdkError as Error).message);
+                }
+                break;
+              } else {
+                console.log("Let's try again...\n");
+                attempts = 0; // Reset attempts if user wants to retry
+              }
+            } else {
+              console.error(`❌ JSON parsing failed: ${parseResult.error}`);
+              console.log("\n💡 Common fixes:");
+              console.log("- Use double quotes: [\"name\"] not ['name']");
+              console.log("- Check brackets: [] for arrays, {} for objects");
+              console.log("- Escape quotes properly in strings");
+              console.log("- Type 'examples' to see field suggestions");
+              
+              if (attempts < maxAttempts) {
+                console.log(`\nTry again (${maxAttempts - attempts} attempts left)...\n`);
+              } else {
+                console.log("❌ Max attempts reached. Operation cancelled.");
+                break;
+              }
+            }
+          } while (attempts < maxAttempts && !parseResult.success);
+          
           break;
         }
         case "exit":

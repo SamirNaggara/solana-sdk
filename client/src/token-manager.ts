@@ -51,16 +51,17 @@ export class TokenManager {
     productId: string
   ): Promise<{ signature: string; hash: string }> {
     const payer = await this.getPayer();
-    const metadata = await this.getMetadataFromId(productId);
+    const hashes = await this.getVisibilityHashes(productId);
 
     if (await this.getSignatureFromId(productId)) {
       throw new Error(`Token already created for product ID ${productId}`);
     }
 
-    const hashData = this.hashObject(metadata);
     const ataInstruction = await this.createInstruction(payer);
     const memoPayload = JSON.stringify({
-      hash: hashData,
+      public: hashes.publicHash,
+      owner: hashes.ownerHash,
+      brand: hashes.brandHash,
     });
     try {
       const signature = await this.sendTransactionWithMemo(
@@ -69,7 +70,7 @@ export class TokenManager {
         memoPayload
       );
       await this.setSignatureFromId(productId, signature);
-      return { signature, hash: hashData };
+      return { signature, hash: hashes.brandHash }; // Return brand hash as main hash
     } catch (err) {
       throw new Error(`Transaction failed: ${err}`);
     }
@@ -81,27 +82,59 @@ export class TokenManager {
   async updateMintToken(
     productUid: string
   ): Promise<{ signature: string; hash: string }> {
-    const existingMemo = await this.getMemoFromSignature(productUid);
-    if (!existingMemo)
-      throw new Error("No memo found for the given product UID.");
-
     const currentSignature = await this.getSignatureFromId(productUid);
     if (!currentSignature)
       throw new Error("No signature found for the given product UID.");
 
-    const memoData = SignatureSchema.parse(JSON.parse(existingMemo));
-    const metadata = await this.getMetadataFromId(productUid);
-    const newHash = this.hashObject(metadata);
+    let existingMemo: string;
+    let memoData: any;
+    
+    try {
+      existingMemo = await this.getMemoFromSignature(productUid);
+      if (!existingMemo)
+        throw new Error("No memo found for the given product UID.");
+      memoData = JSON.parse(existingMemo);
+    } catch (error) {
+      // If we can't get the memo from blockchain (signature invalid/not found),
+      // we'll treat this as a case where we need to create a new token
+      console.warn(`Could not retrieve memo from blockchain for product ${productUid}:`, error);
+      // Create new hashes and proceed with transaction
+      const hashes = await this.getVisibilityHashes(productUid);
+      const payer = await this.getPayer();
+      const ataInstruction = await this.createInstruction(payer);
+      const memoPayload = JSON.stringify({
+        public: hashes.publicHash,
+        owner: hashes.ownerHash,
+        brand: hashes.brandHash,
+      });
 
-    if (memoData.hash === newHash)
+      try {
+        const newSignature = await this.sendTransactionWithMemo(
+          payer,
+          ataInstruction,
+          memoPayload
+        );
+        await this.setSignatureFromId(productUid, newSignature);
+        return { signature: newSignature, hash: hashes.brandHash };
+      } catch (err) {
+        throw new Error(`Transaction failed: ${err}`);
+      }
+    }
+
+    const hashes = await this.getVisibilityHashes(productUid);
+
+    // Check if any hash has changed
+    if (memoData.public === hashes.publicHash && 
+        memoData.owner === hashes.ownerHash && 
+        memoData.brand === hashes.brandHash)
       throw new Error("Metadata has not changed; no update needed.");
-
-    memoData.hash = newHash;
 
     const payer = await this.getPayer();
     const ataInstruction = await this.createInstruction(payer);
     const memoPayload = JSON.stringify({
-      hash: memoData.hash,
+      public: hashes.publicHash,
+      owner: hashes.ownerHash,
+      brand: hashes.brandHash,
     });
 
     try {
@@ -111,7 +144,7 @@ export class TokenManager {
         memoPayload
       );
       await this.setSignatureFromId(productUid, newSignature);
-      return { signature: newSignature, hash: memoData.hash };
+      return { signature: newSignature, hash: hashes.brandHash };
     } catch (err) {
       throw new Error(`Transaction failed: ${err}`);
     }
@@ -167,14 +200,19 @@ export class TokenManager {
   async checkAuthenticityOnBlockchain(
     productId: string
   ): Promise<{ isValid: boolean; reason?: string }> {
-    const metadata = await this.getMetadataFromId(productId);
-    const localHash = this.hashObject(metadata);
+    const hashes = await this.getVisibilityHashes(productId);
     const memo = await this.getMemoFromSignature(productId);
-    const memoData = SignatureSchema.parse(JSON.parse(memo));
+    const memoData = JSON.parse(memo);
 
-    if (memoData.hash !== localHash)
-      return { isValid: false, reason: "Hash mismatch" };
-    return { isValid: true };
+    // Check if all hashes match
+    if (memoData.public !== hashes.publicHash)
+      return { isValid: false, reason: "Public hash mismatch" };
+    if (memoData.owner !== hashes.ownerHash)
+      return { isValid: false, reason: "Owner hash mismatch" };
+    if (memoData.brand !== hashes.brandHash)
+      return { isValid: false, reason: "Brand hash mismatch" };
+    
+    return { isValid: true, reason: "All hashes verified successfully" };
   }
 
   /** Hash arbitrary JSON using the configured algorithm */
@@ -229,6 +267,118 @@ export class TokenManager {
       TOKEN_PROGRAM_ID,
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
+  }
+
+  /**
+   * Get visibility-based hashes for public, owner, and brand levels
+   */
+  private async getVisibilityHashes(productId: string): Promise<{
+    publicHash: string;
+    ownerHash: string;
+    brandHash: string;
+  }> {
+    // Get product data with visibility information
+    const product = await this.prisma.productDPP.findUnique({
+      where: { id: productId },
+      include: {
+        manufacturer: true,
+        materialComposition: true,
+        hazardousSubstances: true,
+        extendedData: true // This is the DppProductVisibility relation
+      },
+    });
+    
+    if (!product) throw new Error(`Product with ID ${productId} not found.`);
+
+    // Get the visibility data
+    const visibilityData = product.extendedData?.[0]; // Assuming one visibility record per product
+    
+    if (!visibilityData) {
+      throw new Error(`No visibility data found for product ID ${productId}`);
+    }
+
+    // Helper function to build data object based on visible fields
+    const buildDataFromVisibility = (visibleFields: any, fullProduct: any) => {
+      if (!visibleFields || visibleFields === null) return {};
+      
+      const data: any = {};
+      const fieldsArray = Array.isArray(visibleFields) ? visibleFields : [];
+      
+      fieldsArray.forEach((field: string) => {
+        switch (field) {
+          case 'id':
+            data.id = fullProduct.id;
+            break;
+          case 'productName':
+            data.productName = fullProduct.productName;
+            break;
+          case 'dateOfManufacture':
+            data.dateOfManufacture = fullProduct.dateOfManufacture.toISOString().split('T')[0];
+            break;
+          case 'placeOfManufacture':
+            data.placeOfManufacture = fullProduct.placeOfManufacture;
+            break;
+          case 'productCategory':
+            data.productCategory = fullProduct.productCategory;
+            break;
+          case 'repairabilityScore':
+            data.repairabilityScore = fullProduct.repairabilityScore;
+            break;
+          case 'endOfLifeInstructions':
+            data.endOfLifeInstructions = fullProduct.endOfLifeInstructions;
+            break;
+          case 'digitalLink':
+            data.digitalLink = fullProduct.digitalLink;
+            break;
+          case 'manufacturerId':
+            data.manufacturerId = fullProduct.manufacturerId;
+            break;
+          case 'signature':
+            data.signature = fullProduct.signature;
+            break;
+          case 'manufacturer':
+            data.manufacturer = {
+              name: fullProduct.manufacturer.name,
+              address: fullProduct.manufacturer.address,
+              contactEmail: fullProduct.manufacturer.contactEmail,
+            };
+            break;
+          case 'materialComposition':
+            data.materialComposition = fullProduct.materialComposition.map((mc: any) => ({
+              material: mc.material,
+              percentage: mc.percentage,
+            }));
+            break;
+          case 'hazardousSubstances':
+            data.hazardousSubstances = fullProduct.hazardousSubstances.map((hs: any) => ({
+              substance: hs.substance,
+              casNumber: hs.casNumber,
+              concentration: hs.concentration,
+            }));
+            break;
+        }
+      });
+      
+      return data;
+    };
+
+    // Public hash - uses fields defined in public visibility
+    const publicData = buildDataFromVisibility(visibilityData.public, product);
+    const publicHash = this.hashObject(JSON.stringify(publicData));
+
+    // Owner hash - uses fields defined in owner visibility
+    const ownerData = buildDataFromVisibility(visibilityData.owner, product);
+    const ownerHash = this.hashObject(JSON.stringify(ownerData));
+
+    // Brand hash - uses fields defined in brand visibility
+    const brandData = buildDataFromVisibility(visibilityData.brand, product);
+    const brandHash = this.hashObject(JSON.stringify(brandData));
+
+    return {
+      publicHash,
+      ownerHash,
+      brandHash
+    };
   }
 
   /**
@@ -354,7 +504,9 @@ export class TokenManager {
     const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
     tx.recentBlockhash = blockhash;
     tx.feePayer = payer.publicKey;
-
+    tx.sign(payer);
+    const isValid = tx.verifySignatures();
+    console.log('Signature valide ? :', isValid);
     return sendAndConfirmTransaction(this.connection, tx, [payer], {
       skipPreflight: false,
       commitment: "confirmed",

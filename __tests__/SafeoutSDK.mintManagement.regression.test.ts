@@ -102,35 +102,44 @@ describe('SafeoutSDK - Mint Management Regression Tests', () => {
         sdk = new SafeoutSDK(mockConnection, mockMintAuthority, mockOwner);
     });
 
-    const createValidProduct = (overrides = {}): ProductInput => ({
-        productUid: '550e8400-e29b-41d4-a716-446655440000',
-        info: {
-            productId: '550e8400-e29b-41d4-a716-446655440000',
-            productName: 'EcoLaptop X200',
-            manufacturer: {
-                name: 'GreenTech Electronics Ltd.',
-                address: '12 Circularity Avenue, Berlin, Germany',
-                contactEmail: 'contact@greentechelectronics.eu'
-            },
-            dateOfManufacture: '2025-05-15',
-            placeOfManufacture: 'Wroclaw, Poland',
-            productCategory: 'Computers and laptops',
-            materialComposition: [
-                { material: 'Aluminum', percentage: 45 },
-                { material: 'Recycled plastic', percentage: 30 },
-                { material: 'Glass', percentage: 10 },
-                { material: 'Electronic components', percentage: 15 }
-            ],
-            hazardousSubstances: [
-                { substance: 'Lead', casNumber: '7439-92-1', concentration: 0.08 },
-                { substance: 'Mercury', casNumber: '7439-97-6', concentration: 0.001 }
-            ],
-            repairabilityScore: 4.2,
-            endOfLifeInstructions: 'Disassemble carefully. Recycle aluminum components separately. Electronic parts must go to certified e-waste facility.',
-            digitalLink: 'https://dpp.greentechelectronics.eu/product/550e8400-e29b-41d4-a716-446655440000',
-            ...overrides
+    const createValidProduct = (overrides: any = {}): ProductInput => {
+        const baseProduct = {
+            productUid: '550e8400-e29b-41d4-a716-446655440000',
+            info: {
+                productId: '550e8400-e29b-41d4-a716-446655440000',
+                productName: 'EcoLaptop X200',
+                manufacturer: {
+                    name: 'GreenTech Electronics Ltd.',
+                    address: '12 Circularity Avenue, Berlin, Germany',
+                    contactEmail: 'contact@greentechelectronics.eu'
+                },
+                dateOfManufacture: '2025-05-15',
+                placeOfManufacture: 'Wroclaw, Poland',
+                productCategory: 'Computers and laptops',
+                materialComposition: [
+                    { material: 'Aluminum', percentage: 45 },
+                    { material: 'Recycled plastic', percentage: 30 },
+                    { material: 'Glass', percentage: 10 },
+                    { material: 'Electronic components', percentage: 15 }
+                ],
+                hazardousSubstances: [
+                    { substance: 'Lead', casNumber: '7439-92-1', concentration: 0.08 },
+                    { substance: 'Mercury', casNumber: '7439-97-6', concentration: 0.001 }
+                ],
+                repairabilityScore: 4.2,
+                endOfLifeInstructions: 'Disassemble carefully. Recycle aluminum components separately. Electronic parts must go to certified e-waste facility.',
+                digitalLink: 'https://dpp.greentechelectronics.eu/product/550e8400-e29b-41d4-a716-446655440000',
+            }
+        };
+        
+        // Apply overrides at the root level and sync productId with productUid if productUid is overridden
+        const result = { ...baseProduct, ...overrides };
+        if (overrides.productUid) {
+            result.info.productId = overrides.productUid;
         }
-    });
+        
+        return result;
+    };
 
     describe('Product Creation with Mint Management', () => {
         it('should create product with mint reuse functionality', async () => {
@@ -259,6 +268,73 @@ describe('SafeoutSDK - Mint Management Regression Tests', () => {
             }));
 
             // Verify mint is still the same
+            const mintInfo = sdk.getMintInfo();
+            expect(mintInfo.mintAddress).toBeTruthy();
+        });
+
+        it('should preserve signatures during batch updates', async () => {
+            const products = [
+                createValidProduct({ productUid: 'batch-update-1' }),
+                createValidProduct({ productUid: 'batch-update-2' }),
+            ];
+
+            // Initialize SDK first
+            await sdk.init();
+
+            // Mock existing products with signatures
+            const mockPrismaManager = (sdk as any).prismaManager;
+            mockPrismaManager.getFullProductData.mockImplementation((productId: string) => {
+                return Promise.resolve({
+                    id: productId,
+                    productName: 'Original Product',
+                    signature: `existing-signature-${productId}`, // Existing signatures
+                    manufacturer: { id: 'mfg-123', name: 'Test Manufacturer' },
+                    materialComposition: [],
+                    hazardousSubstances: [],
+                });
+            });
+
+            // Mock updateProductById to return products with preserved signatures
+            mockPrismaManager.updateProductById.mockImplementation((productId: string, updateData: any) => {
+                return Promise.resolve({
+                    id: productId,
+                    productName: updateData.info?.productName || 'Updated Product',
+                    signature: `existing-signature-${productId}`, // Signature preserved
+                    manufacturer: { id: 'mfg-123', name: 'Test Manufacturer' },
+                    materialComposition: [],
+                    hazardousSubstances: [],
+                });
+            });
+
+            const mockTokenManager = (sdk as any).tokenManager;
+            mockTokenManager.updateMintToken.mockImplementation((productId: string) => {
+                return Promise.resolve({
+                    signature: `new-signature-${productId}`,
+                    hash: `new-hash-${productId}`,
+                });
+            });
+
+            // Test batch update
+            const updates = products.map(product => ({
+                productId: product.productUid,
+                updateData: { info: product.info }
+            }));
+
+            const results = await sdk.updateBatchDppProducts(updates, 'test-user');
+
+            expect(results).toHaveLength(2);
+            
+            // Verify that new signatures from blockchain updates are used
+            expect(results[0]).toEqual(expect.objectContaining({
+                signature: 'new-signature-batch-update-1',
+                hash: 'new-hash-batch-update-1',
+            }));
+            expect(results[1]).toEqual(expect.objectContaining({
+                signature: 'new-signature-batch-update-2',
+                hash: 'new-hash-batch-update-2',
+            }));
+
+            // Verify same mint is used for all updates
             const mintInfo = sdk.getMintInfo();
             expect(mintInfo.mintAddress).toBeTruthy();
         });

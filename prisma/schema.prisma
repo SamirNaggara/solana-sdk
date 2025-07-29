@@ -26,6 +26,7 @@
       hazardousSubstances   HazardousSubstance[]
       signature             String
       history               DppProductHistory[]
+      extendedData          DppProductVisibility[]
 
       @@map("dpp_products")
     }
@@ -78,5 +79,18 @@
       @@map("dpp_product_history")
       @@index([productId])
       @@index([changeTimestamp])
+    }
+
+    model DppProductVisibility {
+      id                    String      @id @default(uuid())
+      productId             String      // Column 1: DPP Product reference
+      public                Json?        // Column 2: public
+      owner                 Json?        // Column 3: owner data as JSON
+      brand                 Json?        // Column 4: brand data as JSON
+
+      product               productDPP  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+      @@map("dpp_product_visibility")
+      @@index([productId])
     }
   
