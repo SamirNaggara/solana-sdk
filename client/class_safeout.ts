@@ -391,6 +391,84 @@ export class SafeoutSDK {
     ]);
   }
 
+  /**
+   * Get a complete DPP product with all related data by ID
+   * Returns a JSON object with the product and all its sub-tables (manufacturer, materialComposition, hazardousSubstances, history, visibility)
+   */
+  public async getDppProductById(productId: string): Promise<any> {
+    if (!this.prismaManager) {
+      throw new Error("SDK is not initialized. Call init() first.");
+    }
+
+    const prisma = this.prismaManager.getPrisma();
+
+    // Get the complete product with all relations
+    const product = await prisma.productDPP.findUnique({
+      where: { id: productId },
+      include: {
+        manufacturer: true,
+        materialComposition: true,
+        hazardousSubstances: true,
+        history: {
+          orderBy: { changeTimestamp: 'desc' }
+        },
+        extendedData: true
+      }
+    });
+
+    if (!product) {
+      throw new Error(`Product with ID ${productId} not found.`);
+    }
+
+    // Transform the result to a clean JSON structure
+    return {
+      product: {
+        id: product.id,
+        productName: product.productName,
+        dateOfManufacture: product.dateOfManufacture.toISOString(),
+        placeOfManufacture: product.placeOfManufacture,
+        productCategory: product.productCategory,
+        repairabilityScore: product.repairabilityScore,
+        endOfLifeInstructions: product.endOfLifeInstructions,
+        digitalLink: product.digitalLink,
+        manufacturerId: product.manufacturerId,
+        signature: product.signature
+      },
+      manufacturer: {
+        id: product.manufacturer.id,
+        name: product.manufacturer.name,
+        address: product.manufacturer.address,
+        contactEmail: product.manufacturer.contactEmail
+      },
+      materialComposition: product.materialComposition.map(mc => ({
+        id: mc.id,
+        material: mc.material,
+        percentage: mc.percentage
+      })),
+      hazardousSubstances: product.hazardousSubstances.map(hs => ({
+        id: hs.id,
+        substance: hs.substance,
+        casNumber: hs.casNumber,
+        concentration: hs.concentration
+      })),
+      history: product.history.map(h => ({
+        id: h.id,
+        action: h.action,
+        changedBy: h.changedBy,
+        changeTimestamp: h.changeTimestamp.toISOString(),
+        previousData: h.previousData,
+        newData: h.newData,
+        changeDescription: h.changeDescription
+      })),
+      visibility: product.extendedData.map(v => ({
+        id: v.id,
+        public: v.public,
+        owner: v.owner,
+        brand: v.brand
+      }))
+    };
+  }
+
   /* ----------------------------------------------------------------------- */
   /*                         Authenticity verification                       */
   /* ----------------------------------------------------------------------- */
