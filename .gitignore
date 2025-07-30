@@ -1,5 +1,7 @@
 *keypair.json
 .env
+!.env.example
+!.env.test
 dist
 node_modules
 /generated/prisma

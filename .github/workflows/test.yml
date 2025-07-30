@@ -10,6 +10,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,6 +37,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Set up database
+        env:
+          DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb?schema=public
+        run: npm run db:setup
+
       - name: Run tests
+        env:
+          DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb?schema=public
         run: npm test
 
