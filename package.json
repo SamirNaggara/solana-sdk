@@ -1,5 +1,5 @@
 {
-  "name": "safeoutsolana",
+  "name": "safeout/solana",
   "version": "1.0.4",
   "description": "Solana Token Minting Project",
   "main": "dist/client/class_safeout.js",
@@ -18,7 +18,10 @@
     "test:user-normalization": "jest __tests__/SafeoutSDK.userNormalization.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
-    "db:setup": "npm run prisma:deploy && npm run prisma:generate"
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate dev",
+    "db:setup": "npm run prisma:push && npm run prisma:generate",
+    "db:setup:migrate": "npm run prisma:deploy && npm run prisma:generate"
   },
   "dependencies": {
     "@solana/spl-memo": "^0.2.5",

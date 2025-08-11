@@ -1,7 +1,7 @@
 
     datasource db {
       provider = "postgresql"
-      url      = "postgresql://safeout:pide@localhost:4242/sdk-1?schema=public"
+      url      = env("DATABASE_URL")
     }
 
  
