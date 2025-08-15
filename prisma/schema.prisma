@@ -1,7 +1,6 @@
-
-    datasource db {
+datasource db {
       provider = "postgresql"
-      url      = env("DATABASE_URL")
+      url      = "postgresql://safeout:pide@localhost:5432/template_db?schema=public"
     }
 
  
@@ -93,4 +92,3 @@
       @@map("dpp_product_visibility")
       @@index([productId])
     }
-  

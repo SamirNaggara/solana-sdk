@@ -1,5 +1,5 @@
 {
-  "name": "@safeout/solanadpp",
+  "name": "safeoutsolanadpp",
   "version": "1.0.4",
   "description": "Solana Token Minting Project",
   "main": "dist/client/class_safeout.js",
