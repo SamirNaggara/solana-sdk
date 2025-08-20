@@ -5,11 +5,13 @@ import { ProductInput, SafeoutSDK } from "./class_safeout";
 /* -------------------------------------------------------------------------- */
 /*  Instance SDK (adapté à ton réseau + clés)                                 */
 /* -------------------------------------------------------------------------- */
+console.log(process.env.MINT_AUTHORITY, process.env.OWNER_PUBLIC_KEY);
+
 const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 const sdk = new SafeoutSDK(
   connection,
-  new PublicKey(process.env.MINT_AUTHORITY || ""),
-  new PublicKey(process.env.OWNER_PUBLIC_KEY || "")
+  new PublicKey("4PKQm5j3ksGgzCsEUQczPpysMtmJXzE5SLAPkL2sp2f1"),
+  new PublicKey("9yMR6Ef1KzzSQxQaofu3JHfQ2cQEtpLjXPzxWAWCdRZ")
 );
 /* -------------------------------------------------------------------------- */
 /*  Helpers I/O                                                               */
@@ -194,7 +196,7 @@ const demoProducts: ProductInput[] = [
 /*  Boucle principale                                                         */
 /* -------------------------------------------------------------------------- */
 async function mainLoop() {
-  await sdk.init(process.env.DATABASE_URL || "");
+  await sdk.init("postgresql://sdk:pide@localhost:5454/sdk-1?schema=public");
   for (; ;) {
     console.log(
       "\nActions : create | update | delete | get | check | batch-create | batch-update | batch-delete | history | history-all | history-stats | visibility | exit"

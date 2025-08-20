@@ -16,12 +16,8 @@
     "test:mint:unit": "jest __tests__/SafeoutSDK.mintManagement.test.ts",
     "test:mint:integration": "jest __tests__/SafeoutSDK.mintManagement.integration.test.ts",
     "test:user-normalization": "jest __tests__/SafeoutSDK.userNormalization.test.ts",
-    "prisma:generate": "prisma generate",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:push": "prisma db push",
-    "prisma:migrate": "prisma migrate dev",
-    "db:setup": "npm run prisma:push && npm run prisma:generate",
-    "db:setup:migrate": "npm run prisma:deploy && npm run prisma:generate"
+    "db:migrate": "node -r ts-node/register scripts/migrate.ts",
+    "db:setup": "npm run db:migrate"
   },
   "dependencies": {
     "@solana/spl-memo": "^0.2.5",
@@ -31,15 +27,17 @@
     "bottleneck": "^2.19.5",
     "cli-progress": "^3.12.0",
     "node-fetch": "^3.3.2",
+    "pg": "^8.11.3",
+    "uuid": "^9.0.1",
     "zod": "^3.25.64"
   },
   "devDependencies": {
-    "@prisma/client": "^6.10.1",
     "@types/jest": "^30.0.0",
     "@types/node-fetch": "^2.6.12",
+    "@types/pg": "^8.10.9",
+    "@types/uuid": "^9.0.7",
     "dotenv": "^17.2.1",
     "jest": "^30.0.3",
-    "prisma": "^6.10.1",
     "ts-jest": "^29.4.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.8.3"

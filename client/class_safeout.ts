@@ -6,7 +6,7 @@ import {
 } from "@solana/web3.js";
 
 // Internal imports
-import { PrismaManager } from "./src/prisma-manager";
+import { DatabaseManager } from "./src/database-manager";
 import { ValidationUtils } from "./src/validation";
 import { MintManager } from "./src/mint-manager";
 import { TokenManager } from "./src/token-manager";
@@ -27,7 +27,7 @@ export class SafeoutSDK {
   private hashAlgo: string = "sha256";
 
   // Manager instances
-  private prismaManager: PrismaManager;
+  private databaseManager: DatabaseManager;
   private mintManager: MintManager;
   private tokenManager: TokenManager | null = null;
   private historyManager: HistoryManager | null = null;
@@ -44,7 +44,7 @@ export class SafeoutSDK {
     this.owner = owner;
     
     // Initialize managers
-    this.prismaManager = new PrismaManager("");
+    this.databaseManager = new DatabaseManager("");
     this.mintManager = new MintManager(connection, mintAuthority);
   }
 
@@ -53,26 +53,28 @@ export class SafeoutSDK {
    */
   public async init(databaseUrl?: string): Promise<void> {
     try {
-      const dbUrl = databaseUrl || process.env.DATABASE_URL;
+      const dbUrl = databaseUrl || "postgresql://sdk:pide@localhost:5454/sdk-1?schema=public";
       if (!dbUrl) {
         throw new Error('DATABASE_URL environment variable is required');
       }
       
-      await this.prismaManager.setupPrisma(dbUrl);
+      // Initialize database connection
+      this.databaseManager = new DatabaseManager(dbUrl);
+      await this.databaseManager.init();
       
       // Initialize mint
       this.mint = await this.mintManager.initializeMint();
       
-      // Initialize managers that need the mint
+      // Initialize managers that need the database pool
       this.tokenManager = new TokenManager(
         this.connection,
-        this.mint, // Use the actual mint, not mintAuthority
+        this.mint,
         this.owner,
         this.hashAlgo,
-        this.prismaManager.getPrisma()
+        this.databaseManager.getPool()
       );
       
-      this.historyManager = new HistoryManager(this.prismaManager.getPrisma());
+      this.historyManager = new HistoryManager(this.databaseManager.getPool());
       
       console.log('SafeoutSDK initialized successfully');
     } catch (error) {
@@ -100,9 +102,7 @@ export class SafeoutSDK {
     const validatedInfo = ValidationUtils.validateProductData(productData.info);
 
     // Check if product already exists
-    const existingProduct = await this.prismaManager.getPrisma().productDPP.findUnique({
-      where: { id: productData.productUid }
-    });
+    const existingProduct = await this.databaseManager.getFullProductData(productData.productUid);
     
     if (existingProduct) {
       throw new Error(`Product with ID ${productData.productUid} already exists.`);
@@ -115,7 +115,7 @@ export class SafeoutSDK {
     };
 
     // Create product in database
-    const product = await this.prismaManager.createProductWithRelations(validatedProductInput);
+    const product = await this.databaseManager.createProductWithRelations(validatedProductInput);
 
     // Create blockchain token
     const mintResult = await this.tokenManager.createMintToken(product.id);
@@ -160,7 +160,7 @@ export class SafeoutSDK {
     // Create all products in database
     const createdProducts = await Promise.all(
       validatedProducts.map((productInput: ProductInput) => 
-        this.prismaManager.createProductWithRelations(productInput)
+        this.databaseManager.createProductWithRelations(productInput)
       )
     );
 
@@ -207,7 +207,7 @@ export class SafeoutSDK {
     }
 
     // Get existing product for history
-    const existingProduct = await this.prismaManager.getFullProductData(productId);
+    const existingProduct = await this.databaseManager.getFullProductData(productId);
     if (!existingProduct) {
       throw new Error(`Product with ID ${productId} not found.`);
     }
@@ -221,7 +221,7 @@ export class SafeoutSDK {
     }
 
     // Update product in database
-    const updatedProduct = await this.prismaManager.updateProductById(
+    const updatedProduct = await this.databaseManager.updateProductById(
       productId,
       validatedData
     );
@@ -264,7 +264,7 @@ export class SafeoutSDK {
     for (const { productId, updateData } of updates) {
       try {
         // Get existing product for history
-        const existingProduct = await this.prismaManager.getFullProductData(productId);
+        const existingProduct = await this.databaseManager.getFullProductData(productId);
         if (!existingProduct) {
           console.warn(`Product with ID ${productId} not found, skipping.`);
           continue;
@@ -281,7 +281,7 @@ export class SafeoutSDK {
         } else {
           validatedData = updateData;
         }
-        const updatedProduct = await this.prismaManager.updateProductById(
+        const updatedProduct = await this.databaseManager.updateProductById(
           productId,
           validatedData
         );
@@ -321,7 +321,7 @@ export class SafeoutSDK {
     }
 
     // Get existing product for history
-    const existingProduct = await this.prismaManager.getFullProductData(productId);
+    const existingProduct = await this.databaseManager.getFullProductData(productId);
     if (!existingProduct) {
       throw new Error(`Product with ID ${productId} not found.`);
     }
@@ -337,7 +337,7 @@ export class SafeoutSDK {
     );
 
     // Delete from database
-    await this.prismaManager.deleteProductWithRelations(productId);
+    await this.databaseManager.deleteProductWithRelations(productId);
   }
 
   /**
@@ -348,11 +348,9 @@ export class SafeoutSDK {
       throw new Error("SDK is not initialized. Call init() first.");
     }
 
-    const prisma = this.prismaManager.getPrisma();
-
     // Get existing products data for history
     const existingProducts = await Promise.all(
-      productIds.map(id => this.prismaManager.getFullProductData(id))
+      productIds.map(id => this.databaseManager.getFullProductData(id))
     );
 
     // Filter out non-existent products
@@ -377,18 +375,10 @@ export class SafeoutSDK {
       )
     );
 
-    // Delete all products and related data in a transaction
-    await prisma.$transaction([
-      prisma.materialComposition.deleteMany({
-        where: { productId: { in: validProductIds } },
-      }),
-      prisma.hazardousSubstance.deleteMany({
-        where: { productId: { in: validProductIds } },
-      }),
-      prisma.productDPP.deleteMany({
-        where: { id: { in: validProductIds } },
-      }),
-    ]);
+    // Delete all products and related data
+    for (const productId of validProductIds) {
+      await this.databaseManager.deleteProductWithRelations(productId);
+    }
   }
 
   /**
@@ -396,30 +386,37 @@ export class SafeoutSDK {
    * Returns a JSON object with the product and all its sub-tables (manufacturer, materialComposition, hazardousSubstances, history, visibility)
    */
   public async getDppProductById(productId: string): Promise<any> {
-    if (!this.prismaManager) {
+    if (!this.databaseManager) {
       throw new Error("SDK is not initialized. Call init() first.");
     }
 
-    const prisma = this.prismaManager.getPrisma();
-
-    // Get the complete product with all relations
-    const product = await prisma.productDPP.findUnique({
-      where: { id: productId },
-      include: {
-        manufacturer: true,
-        materialComposition: true,
-        hazardousSubstances: true,
-        history: {
-          orderBy: { changeTimestamp: 'desc' }
-        },
-        extendedData: true
-      }
-    });
+    // Get the basic product data
+    const product = await this.databaseManager.getFullProductData(productId);
 
     if (!product) {
       throw new Error(`Product with ID ${productId} not found.`);
     }
 
+    // Get history data
+    const history = await this.historyManager?.getProductHistory(productId) || [];
+
+    // Get visibility data
+    const pool = this.databaseManager.getPool();
+    const client = await pool.connect();
+    let visibility: any = {};
+    
+    try {
+      const visibilityResult = await client.query(
+        'SELECT public, owner, brand FROM dpp_product_visibility WHERE product_id = $1',
+        [productId]
+      );
+      
+      if (visibilityResult.rows.length > 0) {
+        visibility = visibilityResult.rows[0];
+      }
+    } finally {
+      client.release();
+    }
     // Transform the result to a clean JSON structure
     return {
       product: {
@@ -431,7 +428,7 @@ export class SafeoutSDK {
         repairabilityScore: product.repairabilityScore,
         endOfLifeInstructions: product.endOfLifeInstructions,
         digitalLink: product.digitalLink,
-        manufacturerId: product.manufacturerId,
+        manufacturerId: product.manufacturer.id,
         signature: product.signature
       },
       manufacturer: {
@@ -440,32 +437,29 @@ export class SafeoutSDK {
         address: product.manufacturer.address,
         contactEmail: product.manufacturer.contactEmail
       },
-      materialComposition: product.materialComposition.map(mc => ({
-        id: mc.id,
+      materialComposition: product.materialComposition.map((mc: any) => ({
         material: mc.material,
         percentage: mc.percentage
       })),
-      hazardousSubstances: product.hazardousSubstances.map(hs => ({
-        id: hs.id,
+      hazardousSubstances: product.hazardousSubstances.map((hs: any) => ({
         substance: hs.substance,
         casNumber: hs.casNumber,
         concentration: hs.concentration
       })),
-      history: product.history.map(h => ({
+      history: history.map((h: any) => ({
         id: h.id,
         action: h.action,
-        changedBy: h.changedBy,
-        changeTimestamp: h.changeTimestamp.toISOString(),
-        previousData: h.previousData,
-        newData: h.newData,
-        changeDescription: h.changeDescription
+        changed_by: h.changed_by,
+        change_timestamp: h.change_timestamp,
+        previous_data: h.previous_data,
+        new_data: h.new_data,
+        change_description: h.change_description
       })),
-      visibility: product.extendedData.map(v => ({
-        id: v.id,
-        public: v.public,
-        owner: v.owner,
-        brand: v.brand
-      }))
+      visibility: {
+        public: visibility.public,
+        owner: visibility.owner,
+        brand: visibility.brand
+      }
     };
   }
 
@@ -616,7 +610,7 @@ export class SafeoutSDK {
     productId: string, 
     data: any
   ): Promise<any> {
-    return this.prismaManager.updateProductVisibility(type, productId, data);
+    return this.databaseManager.updateProductVisibility(type, productId, data);
   }
 
   /**
@@ -651,6 +645,9 @@ export class SafeoutSDK {
   }
 
   private async setupPrisma(): Promise<any> {
-    return this.prismaManager.setupPrisma(process.env.DATABASE_URL || "");
+    return new Promise((resolve) => {
+      // This method is no longer needed with direct PostgreSQL connection
+      resolve(this.databaseManager.getPool());
+    });
   }
 }

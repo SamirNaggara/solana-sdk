@@ -1,22 +1,30 @@
-import { PrismaClient } from '@prisma/client';
+import { Client } from 'pg';
 
-const prisma = new PrismaClient();
+const databaseUrl = "postgresql://safeout:pide@localhost:5432/template_db?schema=public";
 
-async function clearDatabase() {
+async function deleteAllData() {
+  const client = new Client({
+    connectionString: databaseUrl,
+  });
+
   try {
-    await prisma.dppProductHistory.deleteMany();     
-    await prisma.hazardousSubstance.deleteMany();    
-    await prisma.materialComposition.deleteMany();   
+    await client.connect();
+    console.log('Connected to PostgreSQL database');
 
-    await prisma.productDPP.deleteMany();            
-    await prisma.manufacturer.deleteMany();          
+    // Delete all data in reverse order of dependencies
+    await client.query('DELETE FROM dpp_product_visibility');
+    await client.query('DELETE FROM dpp_product_history');
+    await client.query('DELETE FROM material_compositions');
+    await client.query('DELETE FROM hazardous_substances');
+    await client.query('DELETE FROM dpp_products');
+    await client.query('DELETE FROM manufacturers');
 
-    console.log(' Toutes les données Prisma ont été supprimées avec succès.');
+    console.log('All data deleted successfully');
   } catch (error) {
-    console.error(' Une erreur est survenue :', error);
+    console.error('Error deleting data:', error);
   } finally {
-    await prisma.$disconnect();
+    await client.end();
   }
 }
 
-clearDatabase();
+deleteAllData();

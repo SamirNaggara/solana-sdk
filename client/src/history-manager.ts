@@ -1,11 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+import { Pool } from "pg";
 import { ValidationUtils } from './validation';
 
 export class HistoryManager {
-  private prisma: PrismaClient;
+  private pool: Pool;
 
-  constructor(prisma: PrismaClient) {
-    this.prisma = prisma;
+  constructor(pool: Pool) {
+    this.pool = pool;
   }
 
   /**
@@ -28,16 +28,24 @@ export class HistoryManager {
     // Normalize the changedBy parameter
     const normalizedChangedBy = ValidationUtils.normalizeUserName(changedBy);
 
-    await this.prisma.dppProductHistory.create({
-      data: {
-        productId,
-        action,
-        previousData: previousData ? JSON.parse(JSON.stringify(previousData)) : null,
-        newData: newData ? JSON.parse(JSON.stringify(newData)) : null,
-        changedBy: normalizedChangedBy,
-        changeDescription,
-      },
-    });
+    const client = await this.pool.connect();
+    try {
+      await client.query(
+        `INSERT INTO dpp_product_history 
+         (product_id, action, previous_data, new_data, changed_by, change_description)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          productId,
+          action,
+          previousData ? JSON.stringify(previousData) : null,
+          newData ? JSON.stringify(newData) : null,
+          normalizedChangedBy,
+          changeDescription
+        ]
+      );
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -46,12 +54,18 @@ export class HistoryManager {
    * @returns Array of history records for the product
    */
   async getProductHistory(productId: string): Promise<any[]> {
-    const history = await this.prisma.dppProductHistory.findMany({
-      where: { productId },
-      orderBy: { changeTimestamp: 'desc' },
-    });
-
-    return history;
+    const client = await this.pool.connect();
+    try {
+      const result = await client.query(
+        `SELECT * FROM dpp_product_history 
+         WHERE product_id = $1 
+         ORDER BY change_timestamp DESC`,
+        [productId]
+      );
+      return result.rows;
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -65,21 +79,29 @@ export class HistoryManager {
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
     const offset = (page - 1) * limit;
+    const client = await this.pool.connect();
+    
+    try {
+      const [historyResult, totalResult] = await Promise.all([
+        client.query(
+          `SELECT * FROM dpp_product_history 
+           ORDER BY change_timestamp DESC 
+           LIMIT $1 OFFSET $2`,
+          [limit, offset]
+        ),
+        client.query('SELECT COUNT(*) FROM dpp_product_history')
+      ]);
 
-    const [history, total] = await Promise.all([
-      this.prisma.dppProductHistory.findMany({
-        orderBy: { changeTimestamp: 'desc' },
-        skip: offset,
-        take: limit,
-      }),
-      this.prisma.dppProductHistory.count(),
-    ]);
+      const total = parseInt(totalResult.rows[0].count);
 
-    return {
-      history,
-      total,
-      totalPages: Math.ceil(total / limit),
-    };
+      return {
+        history: historyResult.rows,
+        total,
+        totalPages: Math.ceil(total / limit),
+      };
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -95,22 +117,30 @@ export class HistoryManager {
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
     const offset = (page - 1) * limit;
+    const client = await this.pool.connect();
+    
+    try {
+      const [historyResult, totalResult] = await Promise.all([
+        client.query(
+          `SELECT * FROM dpp_product_history 
+           WHERE action = $1
+           ORDER BY change_timestamp DESC 
+           LIMIT $2 OFFSET $3`,
+          [action, limit, offset]
+        ),
+        client.query('SELECT COUNT(*) FROM dpp_product_history WHERE action = $1', [action])
+      ]);
 
-    const [history, total] = await Promise.all([
-      this.prisma.dppProductHistory.findMany({
-        where: { action },
-        orderBy: { changeTimestamp: 'desc' },
-        skip: offset,
-        take: limit,
-      }),
-      this.prisma.dppProductHistory.count({ where: { action } }),
-    ]);
+      const total = parseInt(totalResult.rows[0].count);
 
-    return {
-      history,
-      total,
-      totalPages: Math.ceil(total / limit),
-    };
+      return {
+        history: historyResult.rows,
+        total,
+        totalPages: Math.ceil(total / limit),
+      };
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -126,22 +156,30 @@ export class HistoryManager {
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
     const offset = (page - 1) * limit;
+    const client = await this.pool.connect();
+    
+    try {
+      const [historyResult, totalResult] = await Promise.all([
+        client.query(
+          `SELECT * FROM dpp_product_history 
+           WHERE changed_by = $1
+           ORDER BY change_timestamp DESC 
+           LIMIT $2 OFFSET $3`,
+          [changedBy, limit, offset]
+        ),
+        client.query('SELECT COUNT(*) FROM dpp_product_history WHERE changed_by = $1', [changedBy])
+      ]);
 
-    const [history, total] = await Promise.all([
-      this.prisma.dppProductHistory.findMany({
-        where: { changedBy },
-        orderBy: { changeTimestamp: 'desc' },
-        skip: offset,
-        take: limit,
-      }),
-      this.prisma.dppProductHistory.count({ where: { changedBy } }),
-    ]);
+      const total = parseInt(totalResult.rows[0].count);
 
-    return {
-      history,
-      total,
-      totalPages: Math.ceil(total / limit),
-    };
+      return {
+        history: historyResult.rows,
+        total,
+        totalPages: Math.ceil(total / limit),
+      };
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -159,34 +197,33 @@ export class HistoryManager {
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
     const offset = (page - 1) * limit;
+    const client = await this.pool.connect();
+    
+    try {
+      const [historyResult, totalResult] = await Promise.all([
+        client.query(
+          `SELECT * FROM dpp_product_history 
+           WHERE change_timestamp >= $1 AND change_timestamp <= $2
+           ORDER BY change_timestamp DESC 
+           LIMIT $3 OFFSET $4`,
+          [startDate, endDate, limit, offset]
+        ),
+        client.query(
+          'SELECT COUNT(*) FROM dpp_product_history WHERE change_timestamp >= $1 AND change_timestamp <= $2',
+          [startDate, endDate]
+        )
+      ]);
 
-    const [history, total] = await Promise.all([
-      this.prisma.dppProductHistory.findMany({
-        where: {
-          changeTimestamp: {
-            gte: startDate,
-            lte: endDate,
-          },
-        },
-        orderBy: { changeTimestamp: 'desc' },
-        skip: offset,
-        take: limit,
-      }),
-      this.prisma.dppProductHistory.count({
-        where: {
-          changeTimestamp: {
-            gte: startDate,
-            lte: endDate,
-          },
-        },
-      }),
-    ]);
+      const total = parseInt(totalResult.rows[0].count);
 
-    return {
-      history,
-      total,
-      totalPages: Math.ceil(total / limit),
-    };
+      return {
+        history: historyResult.rows,
+        total,
+        totalPages: Math.ceil(total / limit),
+      };
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -202,35 +239,35 @@ export class HistoryManager {
     uniqueProducts: number;
     uniqueUsers: number;
   }> {
-    const [
-      totalChanges,
-      createCount,
-      updateCount,
-      deleteCount,
-      uniqueProductsResult,
-      uniqueUsersResult,
-    ] = await Promise.all([
-      this.prisma.dppProductHistory.count(),
-      this.prisma.dppProductHistory.count({ where: { action: 'CREATE' } }),
-      this.prisma.dppProductHistory.count({ where: { action: 'UPDATE' } }),
-      this.prisma.dppProductHistory.count({ where: { action: 'DELETE' } }),
-      this.prisma.dppProductHistory.groupBy({
-        by: ['productId'],
-        _count: true,
-      }),
-      this.prisma.dppProductHistory.groupBy({
-        by: ['changedBy'],
-        _count: true,
-      }),
-    ]);
+    const client = await this.pool.connect();
+    
+    try {
+      const [
+        totalResult,
+        createResult,
+        updateResult,
+        deleteResult,
+        uniqueProductsResult,
+        uniqueUsersResult,
+      ] = await Promise.all([
+        client.query('SELECT COUNT(*) FROM dpp_product_history'),
+        client.query('SELECT COUNT(*) FROM dpp_product_history WHERE action = $1', ['CREATE']),
+        client.query('SELECT COUNT(*) FROM dpp_product_history WHERE action = $1', ['UPDATE']),
+        client.query('SELECT COUNT(*) FROM dpp_product_history WHERE action = $1', ['DELETE']),
+        client.query('SELECT COUNT(DISTINCT product_id) FROM dpp_product_history'),
+        client.query('SELECT COUNT(DISTINCT changed_by) FROM dpp_product_history'),
+      ]);
 
-    return {
-      totalChanges,
-      createCount,
-      updateCount,
-      deleteCount,
-      uniqueProducts: uniqueProductsResult.length,
-      uniqueUsers: uniqueUsersResult.length,
-    };
+      return {
+        totalChanges: parseInt(totalResult.rows[0].count),
+        createCount: parseInt(createResult.rows[0].count),
+        updateCount: parseInt(updateResult.rows[0].count),
+        deleteCount: parseInt(deleteResult.rows[0].count),
+        uniqueProducts: parseInt(uniqueProductsResult.rows[0].count),
+        uniqueUsers: parseInt(uniqueUsersResult.rows[0].count),
+      };
+    } finally {
+      client.release();
+    }
   }
 }
