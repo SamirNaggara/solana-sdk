@@ -18,7 +18,6 @@ import {
 import { createMemoInstruction, MEMO_PROGRAM_ID } from "@solana/spl-memo";
 import { createHash } from "crypto";
 import Bottleneck from "bottleneck";
-import { getPayerKeypair } from "../lib/solanaUtils";
 import { SignatureSchema, MintResult } from './types';
 import { Pool } from "pg";
 
@@ -30,17 +29,17 @@ export class TokenManager {
   private pool: Pool;
 
   constructor(
-    connection: Connection, 
-    mint: PublicKey, 
-    owner: PublicKey, 
+    connection: Connection,
+    mint: PublicKey,
+    owner: PublicKey,
     hashAlgo: string,
-    pool: Pool
+    databaseUrl: string
   ) {
     this.connection = connection;
     this.mint = mint;
     this.owner = owner;
     this.hashAlgo = hashAlgo;
-    this.pool = pool;
+    this.pool = new Pool({ connectionString: databaseUrl });
   }
 
   /**
@@ -48,12 +47,14 @@ export class TokenManager {
    * @throws Error if a signature already exists for the product.
    */
   async createMintToken(
-    productId: string
+    productId: string,
+    payerKeypair: Keypair
   ): Promise<{ signature: string; hash: string }> {
-    const payer = await this.getPayer();
+    const payer = payerKeypair;
     const hashes = await this.getVisibilityHashes(productId);
 
-    if (await this.getSignatureFromId(productId)) {
+    const existingSignature = await this.getSignatureFromId(productId);
+    if (existingSignature && existingSignature !== "" && existingSignature !== "demo-signature-placeholder") {
       throw new Error(`Token already created for product ID ${productId}`);
     }
 
@@ -80,7 +81,8 @@ export class TokenManager {
    * Update mint token for existing product
    */
   async updateMintToken(
-    productUid: string
+    productUid: string,
+    payerKeypair: Keypair
   ): Promise<{ signature: string; hash: string }> {
     const currentSignature = await this.getSignatureFromId(productUid);
     if (!currentSignature)
@@ -100,7 +102,7 @@ export class TokenManager {
       console.warn(`Could not retrieve memo from blockchain for product ${productUid}:`, error);
       // Create new hashes and proceed with transaction
       const hashes = await this.getVisibilityHashes(productUid);
-      const payer = await this.getPayer();
+      const payer = payerKeypair;
       const ataInstruction = await this.createInstruction(payer);
       const memoPayload = JSON.stringify({
         public: hashes.publicHash,
@@ -129,7 +131,7 @@ export class TokenManager {
         memoData.brand === hashes.brandHash)
       throw new Error("Metadata has not changed; no update needed.");
 
-    const payer = await this.getPayer();
+    const payer = payerKeypair;
     const ataInstruction = await this.createInstruction(payer);
     const memoPayload = JSON.stringify({
       public: hashes.publicHash,
@@ -157,6 +159,7 @@ export class TokenManager {
    */
   async batchMintToken(
     productIds: string[],
+    payerKeypair: Keypair,
     concurrency = 10
   ): Promise<MintResult[]> {
     const metadataArray = await this.getMetadataFromIdArray(productIds);
@@ -175,9 +178,9 @@ export class TokenManager {
         try {
           let signature: string, hash: string;
           if (!(await this.checkSignatureById(id))) {
-            ({ signature, hash } = await this.createMintToken(id));
+            ({ signature, hash } = await this.createMintToken(id, payerKeypair));
           } else {
-            ({ signature, hash } = await this.updateMintToken(id));
+            ({ signature, hash } = await this.updateMintToken(id, payerKeypair));
           }
 
           results[idx] = { productUid: id, signature, hash };
@@ -220,14 +223,6 @@ export class TokenManager {
     return createHash(this.hashAlgo).update(obj).digest("hex");
   }
 
-  /**
-   * Get the signature for a product by its ID.
-   * @returns Payer Keypair for transaction fees
-   * @throws Error if unable to get payer keypair
-   */
-  private async getPayer(): Promise<Keypair> {
-    return getPayerKeypair();
-  }
 
   /**
    * Create instruction for associated token account
@@ -633,9 +628,9 @@ export class TokenManager {
       );
       
       if (result.rows.length === 0) {
-        throw new Error(`Product with ID ${productId} not found.`);
+        return null; // Product not found, so no signature exists
       }
-      
+
       return result.rows[0].signature || null;
     } finally {
       client.release();

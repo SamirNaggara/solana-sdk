@@ -1,5 +1,7 @@
 import { Client, Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { ProductInput, CompleteProduct } from './types';
 
 export class DatabaseManager {
@@ -23,8 +25,59 @@ export class DatabaseManager {
       await client.query('SELECT 1');
       client.release();
       console.log('Database connection established');
+
+      // Auto-create schema if needed
+      await this.ensureSchemaExists();
     } catch (error) {
       console.error('Failed to connect to database:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ensure database schema exists - auto-create tables if needed
+   */
+  private async ensureSchemaExists(): Promise<void> {
+    try {
+      console.log('🔧 Checking database schema...');
+
+      const client = await this.pool.connect();
+
+      // Check if main table exists
+      const result = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'dpp_products'
+        );
+      `);
+
+      if (!result.rows[0].exists) {
+        console.log('📦 Creating database schema (first time setup)...');
+        await this.createSchemaFromFile(client);
+        console.log('✅ Database schema created successfully!');
+      } else {
+        console.log('✅ Database schema already exists');
+      }
+
+      client.release();
+    } catch (error) {
+      throw new Error(`Failed to create database schema: ${error instanceof Error ? error.message : String(error)}\n\nPlease ensure:\n- Your database user has CREATE privileges\n- The database server is accessible\n- The migration file exists at migrations/001_initial_schema.sql`);
+    }
+  }
+
+  /**
+   * Create the database schema by reading the SQL migration file
+   */
+  private async createSchemaFromFile(client: any): Promise<void> {
+    try {
+      const migrationPath = join(__dirname, '..', '..', 'migrations', '001_initial_schema.sql');
+      const schemaSql = readFileSync(migrationPath, 'utf-8');
+      await client.query(schemaSql);
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        throw new Error('Migration file not found at migrations/001_initial_schema.sql. Please ensure the migration file exists.');
+      }
       throw error;
     }
   }
@@ -90,7 +143,11 @@ export class DatabaseManager {
     try {
       await client.query('BEGIN');
 
-      const manufacturerId = await this.createOrFindManufacturer(productData.info.manufacturer);
+      const manufacturerId = await this.createOrFindManufacturer({
+        name: productData.info.manufacturer.name.value,
+        address: productData.info.manufacturer.address.value,
+        contactEmail: productData.info.manufacturer.contactEmail.value
+      });
 
       // Create the main product
       const productResult = await client.query(
@@ -102,15 +159,15 @@ export class DatabaseManager {
          RETURNING *`,
         [
           productData.productUid,
-          productData.info.productName,
-          new Date(productData.info.dateOfManufacture),
-          productData.info.placeOfManufacture,
-          productData.info.productCategory,
-          productData.info.repairabilityScore,
-          productData.info.endOfLifeInstructions,
-          productData.info.digitalLink,
+          productData.info.productName.value,
+          new Date(productData.info.dateOfManufacture.value),
+          productData.info.placeOfManufacture.value,
+          productData.info.productCategory.value,
+          productData.info.repairabilityScore.value,
+          productData.info.endOfLifeInstructions.value,
+          productData.info.digitalLink.value,
           manufacturerId,
-          ""
+          productData.info.signature.value
         ]
       );
 
@@ -120,7 +177,7 @@ export class DatabaseManager {
       for (const mc of productData.info.materialComposition) {
         await client.query(
           'INSERT INTO material_compositions (material, percentage, product_id) VALUES ($1, $2, $3)',
-          [mc.material, mc.percentage, product.productId]
+          [mc.material.value, mc.percentage.value, product.productId]
         );
       }
 
@@ -128,7 +185,7 @@ export class DatabaseManager {
       for (const hs of productData.info.hazardousSubstances) {
         await client.query(
           'INSERT INTO hazardous_substances (substance, cas_number, concentration, product_id) VALUES ($1, $2, $3, $4)',
-          [hs.substance, hs.casNumber, hs.concentration, product.productId]
+          [hs.substance.value, hs.casNumber.value, hs.concentration.value, product.productId]
         );
       }
 

@@ -1,8 +1,7 @@
-import { PublicKey, Connection } from "@solana/web3.js";
+import { PublicKey, Connection, Keypair } from "@solana/web3.js";
 import { createMint, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { getPayerKeypair } from "../lib/solanaUtils";
 
 export class MintManager {
   private mintConfigPath: string;
@@ -63,7 +62,7 @@ export class MintManager {
    * Initialize or load existing mint account
    * @returns PublicKey of the mint (existing or newly created)
    */
-  async initializeMint(): Promise<PublicKey> {
+  async initializeMint(payerKeypair: Keypair): Promise<PublicKey> {
     // First, try to load existing mint from config
     const existingMint = this.loadMintConfig();
     
@@ -79,7 +78,7 @@ export class MintManager {
     }
 
     // Create new mint if none exists or the saved one is invalid
-    const payer = await getPayerKeypair();
+    const payer = payerKeypair;
     console.log('Creating new mint...');
     const newMint = await createMint(
       this.connection, 
@@ -104,9 +103,9 @@ export class MintManager {
    * @param minBalance - Minimum SOL balance required (default: 0.1 SOL)
    * @returns True if balance was topped up, false if not needed
    */
-  async checkAndTopUpBalance(minBalance: number = 0.1): Promise<boolean> {
+  async checkAndTopUpBalance(payerKeypair: Keypair, minBalance: number = 0.1): Promise<boolean> {
     try {
-      const payer = await getPayerKeypair();
+      const payer = payerKeypair;
       const balance = await this.connection.getBalance(payer.publicKey);
       const balanceInSol = balance / 1e9; // Convert lamports to SOL
       
@@ -139,8 +138,8 @@ export class MintManager {
    * Get current SOL balance
    * @returns Balance in SOL
    */
-  async getBalance(): Promise<number> {
-    const payer = await getPayerKeypair();
+  async getBalance(payerKeypair: Keypair): Promise<number> {
+    const payer = payerKeypair;
     const balance = await this.connection.getBalance(payer.publicKey);
     return balance / 1e9; // Convert lamports to SOL
   }

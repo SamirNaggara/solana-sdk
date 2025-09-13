@@ -3,8 +3,13 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 async function runMigrations() {
-  const databaseUrl = "postgresql://sdk:pide@localhost:5454/sdk-1?schema=public";
+  // Load environment variables
+  require('dotenv').config();
+
+  const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
+    console.error('❌ DATABASE_URL not found in .env file');
+    console.log('Please create a .env file with: DATABASE_URL="postgresql://user:password@localhost:5432/database"');
     throw new Error('DATABASE_URL environment variable is required');
   }
 
@@ -13,8 +18,9 @@ async function runMigrations() {
   });
 
   try {
+    console.log(`🔗 Connecting to database: ${databaseUrl.replace(/:[^:@]*@/, ':***@')}`);
     await client.connect();
-    console.log('Connected to PostgreSQL database');
+    console.log('✅ Connected to PostgreSQL database');
 
     // Create migrations table if it doesn't exist
     await client.query(`

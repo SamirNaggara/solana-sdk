@@ -8,7 +8,7 @@
     "dist"
   ],
   "scripts": {
-    "start": "ts-node mintToken.ts",
+    "start": "ts-node client/cli.ts",
     "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch",

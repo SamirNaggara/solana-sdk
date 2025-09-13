@@ -17,111 +17,172 @@ import { ProductInput, CompleteProduct, MintResult } from "./src/types";
 export type { ProductInput, CompleteProduct, MintResult } from "./src/types";
 
 /**
+ * Configuration interface for SafeoutSDK initialization
+ */
+export interface SafeoutConfig {
+  databaseUrl: string;
+  rpcUrl?: string; // default: 'https://api.devnet.solana.com'
+  mintAuthorityPrivateKey?: string;
+  ownerPrivateKey?: string;
+  mintAuthority?: string; // PublicKey as string
+  owner?: string; // PublicKey as string
+}
+
+/**
  * SafeoutSDK - Main SDK class for managing digital product passports (DPP) on Solana blockchain
  */
 export class SafeoutSDK {
-  private connection: Connection;
-  private mintAuthority: PublicKey;
-  private owner: PublicKey;
-  private mint: PublicKey | null = null;
+  // Simple parameters with defaults
+  private rpcUrl: string = 'https://api.devnet.solana.com';
   private hashAlgo: string = "sha256";
 
+  // Complex objects created from simple parameters
+  private connection: Connection | null = null;
+  private mintAuthorityKeypair: Keypair | null = null;
+  private ownerKeypair: Keypair | null = null;
+  private mint: PublicKey | null = null;
+
   // Manager instances
-  private databaseManager: DatabaseManager;
-  private mintManager: MintManager;
+  private databaseManager: DatabaseManager | null = null;
+  private mintManager: MintManager | null = null;
   private tokenManager: TokenManager | null = null;
   private historyManager: HistoryManager | null = null;
 
   /**
    * Create a new SafeoutSDK instance
-   * @param connection - Solana connection instance
-   * @param mintAuthority - PublicKey of the mint authority
-   * @param owner - PublicKey of the token owner
    */
-  constructor(connection: Connection, mintAuthority: PublicKey, owner: PublicKey) {
-    this.connection = connection;
-    this.mintAuthority = mintAuthority;
-    this.owner = owner;
-    
-    // Initialize managers
-    this.databaseManager = new DatabaseManager("");
-    this.mintManager = new MintManager(connection, mintAuthority);
+  constructor() {
+    // Empty constructor - all configuration happens in init()
   }
 
   /**
-   * Initialize the SDK - must be called before using other methods
+   * Initialize the SDK with configuration
+   * @param config - Configuration object
    */
-  public async init(databaseUrl?: string): Promise<void> {
-    try {
-      const dbUrl = databaseUrl || "postgresql://sdk:pide@localhost:5454/sdk-1?schema=public";
-      if (!dbUrl) {
-        throw new Error('DATABASE_URL environment variable is required');
-      }
-      
-      // Initialize database connection
-      this.databaseManager = new DatabaseManager(dbUrl);
-      await this.databaseManager.init();
-      
-      // Initialize mint
-      this.mint = await this.mintManager.initializeMint();
-      
-      // Initialize managers that need the database pool
-      this.tokenManager = new TokenManager(
-        this.connection,
-        this.mint,
-        this.owner,
-        this.hashAlgo,
-        this.databaseManager.getPool()
+  public async init(config: SafeoutConfig): Promise<void> {
+    // Set simple parameters with defaults
+    this.rpcUrl = config.rpcUrl || this.rpcUrl;
+
+    // Create complex objects from simple parameters
+    this.connection = new Connection(this.rpcUrl, 'confirmed');
+
+    // Handle mint authority - either from private key or public key string
+    if (config.mintAuthorityPrivateKey) {
+      this.mintAuthorityKeypair = Keypair.fromSecretKey(
+        new Uint8Array(JSON.parse(config.mintAuthorityPrivateKey))
       );
-      
-      this.historyManager = new HistoryManager(this.databaseManager.getPool());
-      
-      console.log('SafeoutSDK initialized successfully');
-    } catch (error) {
-      console.error('Failed to initialize SafeoutSDK:', error);
-      throw error;
+    } else if (config.mintAuthority) {
+      // If only public key provided, create a keypair with dummy secret (can't sign)
+      throw new Error('Public key only provided for mint authority. Private key required for signing transactions.');
+    } else {
+      // Generate random keypair as default
+      this.mintAuthorityKeypair = Keypair.generate();
+    }
+
+    // Handle owner - either from private key or public key string
+    if (config.ownerPrivateKey) {
+      this.ownerKeypair = Keypair.fromSecretKey(
+        new Uint8Array(JSON.parse(config.ownerPrivateKey))
+      );
+    } else if (config.owner) {
+      // If only public key provided, create a keypair with dummy secret (can't sign)
+      throw new Error('Public key only provided for owner. Private key required for signing transactions.');
+    } else {
+      // Use mint authority as default owner
+      this.ownerKeypair = this.mintAuthorityKeypair;
+    }
+
+    // Initialize managers
+    this.databaseManager = new DatabaseManager(config.databaseUrl);
+    this.mintManager = new MintManager(this.connection, this.mintAuthorityKeypair.publicKey);
+
+    // Initialize database connection
+    await this.databaseManager.init();
+
+    // Initialize mint
+    this.mint = await this.mintManager.initializeMint(this.mintAuthorityKeypair);
+
+    // Initialize managers that need the database pool
+    this.tokenManager = new TokenManager(
+      this.connection,
+      this.mint,
+      this.ownerKeypair.publicKey,
+      this.hashAlgo,
+      config.databaseUrl
+    );
+
+    this.historyManager = new HistoryManager(this.databaseManager!.getPool());
+
+    console.log('SafeoutSDK initialized successfully');
+  }
+
+  /**
+   * Ensure SDK is initialized
+   */
+  private ensureInitialized(): void {
+    if (!this.connection || !this.mintAuthorityKeypair || !this.ownerKeypair || !this.databaseManager || !this.mintManager) {
+      throw new Error('SDK not initialized. Please call init() first.');
     }
   }
+
 
   /* ----------------------------------------------------------------------- */
   /*                              Product CRUD                               */
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Create a new DPP product
+   * Validate DPP product data structure and types
+   * @param productData - The product data to validate
+   * @returns Validated product data
+   * @throws Error if validation fails
    */
-  public async createDppProduct(
-    productData: ProductInput,
+  public validateDppProductData(productData: ProductInput): ProductInput {
+    try {
+      const validatedInfo = ValidationUtils.validateProductData(productData.info);
+      return {
+        productUid: productData.productUid,
+        info: validatedInfo
+      };
+    } catch (error) {
+      throw new Error(`DPP validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Create DPP products (single or multiple)
+   */
+  public async createDppProducts(productData: ProductInput, changedBy?: string): Promise<CompleteProduct>;
+  public async createDppProducts(productsData: ProductInput[], changedBy?: string): Promise<CompleteProduct[]>;
+  public async createDppProducts(
+    data: ProductInput | ProductInput[],
     changedBy?: string
-  ): Promise<CompleteProduct> {
-    if (!this.tokenManager || !this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
+  ): Promise<CompleteProduct | CompleteProduct[]> {
+    this.ensureInitialized();
+
+    // Handle single product
+    if (!Array.isArray(data)) {
+      return this.createSingleProduct(data, changedBy);
     }
 
-    // Validate input data
-    const validatedInfo = ValidationUtils.validateProductData(productData.info);
+    // Handle multiple products
+    return this.createMultipleProducts(data, changedBy);
+  }
 
+  private async createSingleProduct(productData: ProductInput, changedBy?: string): Promise<CompleteProduct> {
     // Check if product already exists
-    const existingProduct = await this.databaseManager.getFullProductData(productData.productUid);
-    
+    const existingProduct = await this.databaseManager!.getFullProductData(productData.productUid);
     if (existingProduct) {
       throw new Error(`Product with ID ${productData.productUid} already exists.`);
     }
 
-    // Reconstruct complete ProductInput object with validated data
-    const validatedProductInput: ProductInput = {
-      productUid: productData.productUid,
-      info: validatedInfo
-    };
-
     // Create product in database
-    const product = await this.databaseManager.createProductWithRelations(validatedProductInput);
+    const product = await this.databaseManager!.createProductWithRelations(productData);
 
     // Create blockchain token
-    const mintResult = await this.tokenManager.createMintToken(product.id);
+    const mintResult = await this.tokenManager!.createMintToken(product.id, this.mintAuthorityKeypair!);
 
     // Record in history
-    await this.historyManager.recordProductHistory(
+    await this.historyManager!.recordProductHistory(
       product.id,
       'CREATE',
       null,
@@ -137,36 +198,17 @@ export class SafeoutSDK {
     };
   }
 
-  /**
-   * Create multiple DPP products in batch
-   */
-  public async createBatchDppProducts(
-    productsData: ProductInput[],
-    changedBy?: string
-  ): Promise<CompleteProduct[]> {
-    if (!this.tokenManager || !this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-
-    // Validate all products and reconstruct ProductInput objects
-    const validatedProducts = productsData.map(data => {
-      const validatedInfo = ValidationUtils.validateProductData(data.info);
-      return {
-        productUid: data.productUid,
-        info: validatedInfo
-      };
-    });
-
+  private async createMultipleProducts(productsData: ProductInput[], changedBy?: string): Promise<CompleteProduct[]> {
     // Create all products in database
     const createdProducts = await Promise.all(
-      validatedProducts.map((productInput: ProductInput) => 
-        this.databaseManager.createProductWithRelations(productInput)
+      productsData.map((productInput: ProductInput) =>
+        this.databaseManager!.createProductWithRelations(productInput)
       )
     );
 
     // Mint tokens for all products
     const productIds = createdProducts.map((p: any) => p.id);
-    const mintResults = await this.tokenManager.batchMintToken(productIds);
+    const mintResults = await this.tokenManager!.batchMintToken(productIds, this.mintAuthorityKeypair!);
 
     // Record history for all products
     const normalizedUser = ValidationUtils.normalizeUserName(changedBy);
@@ -178,13 +220,13 @@ export class SafeoutSDK {
           null,
           product,
           normalizedUser,
-          'Batch product creation'
+          'Product created'
         )
       )
     );
 
     // Combine results
-    return createdProducts.map((product: any, index: number) => {
+    return createdProducts.map((product: any) => {
       const mintResult = mintResults.find(r => r.productUid === product.id);
       return {
         ...product,
@@ -195,42 +237,56 @@ export class SafeoutSDK {
   }
 
   /**
-   * Update an existing DPP product
+   * Update DPP products (single or multiple)
    */
-  public async updateDppProduct(
+  public async updateDppProducts(
+    productId: string,
+    updateData: Partial<ProductInput>,
+    changedBy?: string
+  ): Promise<CompleteProduct>;
+  public async updateDppProducts(
+    updates: Array<{ productId: string; updateData: Partial<ProductInput> }>,
+    changedBy?: string
+  ): Promise<CompleteProduct[]>;
+  public async updateDppProducts(
+    data: string | Array<{ productId: string; updateData: Partial<ProductInput> }>,
+    updateDataOrChangedBy?: Partial<ProductInput> | string,
+    changedBy?: string
+  ): Promise<CompleteProduct | CompleteProduct[]> {
+    this.ensureInitialized();
+
+    // Handle single product update
+    if (typeof data === 'string') {
+      const productId = data;
+      const updateData = updateDataOrChangedBy as Partial<ProductInput>;
+      return this.updateSingleProduct(productId, updateData, changedBy);
+    }
+
+    // Handle multiple products update
+    const updates = data;
+    const changedByUser = updateDataOrChangedBy as string;
+    return this.updateMultipleProducts(updates, changedByUser);
+  }
+
+  private async updateSingleProduct(
     productId: string,
     updateData: Partial<ProductInput>,
     changedBy?: string
   ): Promise<CompleteProduct> {
-    if (!this.tokenManager || !this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-
     // Get existing product for history
-    const existingProduct = await this.databaseManager.getFullProductData(productId);
+    const existingProduct = await this.databaseManager!.getFullProductData(productId);
     if (!existingProduct) {
       throw new Error(`Product with ID ${productId} not found.`);
     }
 
-    // Validate update data if info is provided
-    let validatedData;
-    if (updateData.info) {
-      validatedData = ValidationUtils.validateProductData(updateData.info);
-    } else {
-      validatedData = updateData;
-    }
-
     // Update product in database
-    const updatedProduct = await this.databaseManager.updateProductById(
-      productId,
-      validatedData
-    );
+    const updatedProduct = await this.databaseManager!.updateProductById(productId, updateData);
 
     // Update blockchain token
-    const mintResult = await this.tokenManager.updateMintToken(productId);
+    const mintResult = await this.tokenManager!.updateMintToken(productId, this.mintAuthorityKeypair!);
 
     // Record in history
-    await this.historyManager.recordProductHistory(
+    await this.historyManager!.recordProductHistory(
       productId,
       'UPDATE',
       existingProduct,
@@ -246,17 +302,10 @@ export class SafeoutSDK {
     };
   }
 
-  /**
-   * Update multiple DPP products in batch
-   */
-  public async updateBatchDppProducts(
+  private async updateMultipleProducts(
     updates: Array<{ productId: string; updateData: Partial<ProductInput> }>,
     changedBy?: string
   ): Promise<CompleteProduct[]> {
-    if (!this.tokenManager || !this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-
     const results: CompleteProduct[] = [];
     const normalizedUser = ValidationUtils.normalizeUserName(changedBy);
 
@@ -264,39 +313,26 @@ export class SafeoutSDK {
     for (const { productId, updateData } of updates) {
       try {
         // Get existing product for history
-        const existingProduct = await this.databaseManager.getFullProductData(productId);
+        const existingProduct = await this.databaseManager!.getFullProductData(productId);
         if (!existingProduct) {
           console.warn(`Product with ID ${productId} not found, skipping.`);
           continue;
         }
 
-        // Validate and update
-        let validatedData;
-        if (updateData.info) {
-          const validatedInfo = ValidationUtils.validateProductData(updateData.info);
-          validatedData = {
-            productUid: updateData.productUid || productId,
-            info: validatedInfo
-          };
-        } else {
-          validatedData = updateData;
-        }
-        const updatedProduct = await this.databaseManager.updateProductById(
-          productId,
-          validatedData
-        );
+        // Update product
+        const updatedProduct = await this.databaseManager!.updateProductById(productId, updateData);
 
         // Update blockchain token
-        const mintResult = await this.tokenManager.updateMintToken(productId);
+        const mintResult = await this.tokenManager!.updateMintToken(productId, this.mintAuthorityKeypair!);
 
         // Record in history
-        await this.historyManager.recordProductHistory(
+        await this.historyManager!.recordProductHistory(
           productId,
           'UPDATE',
           existingProduct,
           updatedProduct,
           normalizedUser,
-          'Batch product update'
+          'Product updated'
         );
 
         results.push({
@@ -313,21 +349,31 @@ export class SafeoutSDK {
   }
 
   /**
-   * Delete a DPP product
+   * Delete DPP products (single or multiple)
    */
-  public async deleteDppProduct(productId: string, changedBy?: string): Promise<void> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
+  public async deleteDppProducts(productId: string, changedBy?: string): Promise<void>;
+  public async deleteDppProducts(productIds: string[], changedBy?: string): Promise<void>;
+  public async deleteDppProducts(data: string | string[], changedBy?: string): Promise<void> {
+    this.ensureInitialized();
+
+    // Handle single product deletion
+    if (typeof data === 'string') {
+      return this.deleteSingleProduct(data, changedBy);
     }
 
+    // Handle multiple products deletion
+    return this.deleteMultipleProducts(data, changedBy);
+  }
+
+  private async deleteSingleProduct(productId: string, changedBy?: string): Promise<void> {
     // Get existing product for history
-    const existingProduct = await this.databaseManager.getFullProductData(productId);
+    const existingProduct = await this.databaseManager!.getFullProductData(productId);
     if (!existingProduct) {
       throw new Error(`Product with ID ${productId} not found.`);
     }
 
     // Record deletion in history before deleting
-    await this.historyManager.recordProductHistory(
+    await this.historyManager!.recordProductHistory(
       productId,
       'DELETE',
       existingProduct,
@@ -337,20 +383,13 @@ export class SafeoutSDK {
     );
 
     // Delete from database
-    await this.databaseManager.deleteProductWithRelations(productId);
+    await this.databaseManager!.deleteProductWithRelations(productId);
   }
 
-  /**
-   * Delete multiple products in batch
-   */
-  public async deleteBatchDppProducts(productIds: string[], changedBy?: string): Promise<void> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-
+  private async deleteMultipleProducts(productIds: string[], changedBy?: string): Promise<void> {
     // Get existing products data for history
     const existingProducts = await Promise.all(
-      productIds.map(id => this.databaseManager.getFullProductData(id))
+      productIds.map(id => this.databaseManager!.getFullProductData(id))
     );
 
     // Filter out non-existent products
@@ -370,83 +409,66 @@ export class SafeoutSDK {
           product,
           null,
           ValidationUtils.normalizeUserName(changedBy),
-          'Batch product deletion'
+          'Product deleted'
         )
       )
     );
 
     // Delete all products and related data
     for (const productId of validProductIds) {
-      await this.databaseManager.deleteProductWithRelations(productId);
+      await this.databaseManager!.deleteProductWithRelations(productId);
     }
   }
 
   /**
-   * Get a complete DPP product with all related data by ID
-   * Returns a JSON object with the product and all its sub-tables (manufacturer, materialComposition, hazardousSubstances, history, visibility)
+   * Get DPP products (single or multiple)
    */
-  public async getDppProductById(productId: string): Promise<any> {
-    if (!this.databaseManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
+  public async getDppProducts(
+    productId: string,
+    userAccessLevel?: 'public' | 'owner' | 'private'
+  ): Promise<CompleteProduct>;
+  public async getDppProducts(
+    productIds: string[],
+    userAccessLevel?: 'public' | 'owner' | 'private'
+  ): Promise<CompleteProduct[]>;
+  public async getDppProducts(
+    data: string | string[],
+    userAccessLevel: 'public' | 'owner' | 'private' = 'public'
+  ): Promise<CompleteProduct | CompleteProduct[]> {
+    this.ensureInitialized();
+
+    // Handle single product
+    if (typeof data === 'string') {
+      return this.getSingleProduct(data, userAccessLevel);
     }
 
+    // Handle multiple products
+    return this.getMultipleProducts(data, userAccessLevel);
+  }
+
+  private async getSingleProduct(
+    productId: string,
+    userAccessLevel: 'public' | 'owner' | 'private'
+  ): Promise<CompleteProduct> {
     // Get the basic product data
-    const product = await this.databaseManager.getFullProductData(productId);
+    const product = await this.databaseManager!.getFullProductData(productId);
 
     if (!product) {
       throw new Error(`Product with ID ${productId} not found.`);
     }
 
-    // Get history data
-    const history = await this.historyManager?.getProductHistory(productId) || [];
+    // Apply access level filtering using ValidationUtils
+    const filteredProduct = ValidationUtils.filterProductByAccess(product, userAccessLevel);
 
-    // Get visibility data
-    const pool = this.databaseManager.getPool();
-    const client = await pool.connect();
-    let visibility: any = {};
-    
-    try {
-      const visibilityResult = await client.query(
-        'SELECT public, owner, brand FROM dpp_product_visibility WHERE product_id = $1',
-        [productId]
-      );
-      
-      if (visibilityResult.rows.length > 0) {
-        visibility = visibilityResult.rows[0];
-      }
-    } finally {
-      client.release();
+    // Get history data (only for owner/private access)
+    let history: any[] = [];
+    if (userAccessLevel === 'owner' || userAccessLevel === 'private') {
+      history = await this.historyManager!.getProductHistory(productId) || [];
     }
-    // Transform the result to a clean JSON structure
+
     return {
-      product: {
-        id: product.id,
-        productName: product.productName,
-        dateOfManufacture: product.dateOfManufacture.toISOString(),
-        placeOfManufacture: product.placeOfManufacture,
-        productCategory: product.productCategory,
-        repairabilityScore: product.repairabilityScore,
-        endOfLifeInstructions: product.endOfLifeInstructions,
-        digitalLink: product.digitalLink,
-        manufacturerId: product.manufacturer.id,
-        signature: product.signature
-      },
-      manufacturer: {
-        id: product.manufacturer.id,
-        name: product.manufacturer.name,
-        address: product.manufacturer.address,
-        contactEmail: product.manufacturer.contactEmail
-      },
-      materialComposition: product.materialComposition.map((mc: any) => ({
-        material: mc.material,
-        percentage: mc.percentage
-      })),
-      hazardousSubstances: product.hazardousSubstances.map((hs: any) => ({
-        substance: hs.substance,
-        casNumber: hs.casNumber,
-        concentration: hs.concentration
-      })),
-      history: history.map((h: any) => ({
+      ...filteredProduct,
+      history: history.length > 0 ? history.map((h: any) => ({
         id: h.id,
         action: h.action,
         changed_by: h.changed_by,
@@ -454,13 +476,28 @@ export class SafeoutSDK {
         previous_data: h.previous_data,
         new_data: h.new_data,
         change_description: h.change_description
-      })),
-      visibility: {
-        public: visibility.public,
-        owner: visibility.owner,
-        brand: visibility.brand
-      }
+      })) : undefined
     };
+  }
+
+  private async getMultipleProducts(
+    productIds: string[],
+    userAccessLevel: 'public' | 'owner' | 'private'
+  ): Promise<CompleteProduct[]> {
+    // Get all products in parallel
+    const products = await Promise.all(
+      productIds.map(async (productId) => {
+        try {
+          return await this.getSingleProduct(productId, userAccessLevel);
+        } catch (error) {
+          console.warn(`Could not retrieve product ${productId}:`, error);
+          return null;
+        }
+      })
+    );
+
+    // Filter out failed retrievals
+    return products.filter((product): product is CompleteProduct => product !== null);
   }
 
   /* ----------------------------------------------------------------------- */
@@ -473,11 +510,9 @@ export class SafeoutSDK {
   public async checkAuthenticityOnBlockchain(
     productId: string
   ): Promise<{ isValid: boolean; reason?: string }> {
-    if (!this.tokenManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    
-    return this.tokenManager.checkAuthenticityOnBlockchain(productId);
+    this.ensureInitialized();
+
+    return this.tokenManager!.checkAuthenticityOnBlockchain(productId);
   }
 
   /* ----------------------------------------------------------------------- */
@@ -488,7 +523,8 @@ export class SafeoutSDK {
    * Check and top up SOL balance if needed
    */
   public async checkAndTopUpBalance(minBalance: number = 0.1): Promise<boolean> {
-    return this.mintManager.checkAndTopUpBalance(minBalance);
+    this.ensureInitialized();
+    return this.mintManager!.checkAndTopUpBalance(this.mintAuthorityKeypair!, minBalance);
   }
 
   /**
@@ -497,7 +533,7 @@ export class SafeoutSDK {
   public getMintInfo(): { mintAddress: string | null; mintAuthority: string } {
     return {
       mintAddress: this.mint?.toString() || null,
-      mintAuthority: this.mintAuthority.toString()
+      mintAuthority: this.mintAuthorityKeypair!.publicKey.toString()
     };
   }
 
@@ -505,17 +541,16 @@ export class SafeoutSDK {
    * Get current SOL balance
    */
   public async getBalance(): Promise<number> {
-    return this.mintManager.getBalance();
+    this.ensureInitialized();
+    return this.mintManager!.getBalance(this.mintAuthorityKeypair!);
   }
 
   /**
    * Get the history of a specific product by its ID
    */
   public async getProductHistory(productId: string): Promise<any[]> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return this.historyManager.getProductHistory(productId);
+    this.ensureInitialized();
+    return this.historyManager!.getProductHistory(productId);
   }
 
   /**
@@ -525,10 +560,8 @@ export class SafeoutSDK {
     page: number = 1,
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return this.historyManager.getAllProductHistory(page, limit);
+    this.ensureInitialized();
+    return this.historyManager!.getAllProductHistory(page, limit);
   }
 
   /**
@@ -539,10 +572,8 @@ export class SafeoutSDK {
     page: number = 1,
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return this.historyManager.getProductHistoryByAction(action, page, limit);
+    this.ensureInitialized();
+    return this.historyManager!.getProductHistoryByAction(action, page, limit);
   }
 
   /**
@@ -553,10 +584,8 @@ export class SafeoutSDK {
     page: number = 1,
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return this.historyManager.getProductHistoryByUser(changedBy, page, limit);
+    this.ensureInitialized();
+    return this.historyManager!.getProductHistoryByUser(changedBy, page, limit);
   }
 
   /**
@@ -568,10 +597,8 @@ export class SafeoutSDK {
     page: number = 1,
     limit: number = 50
   ): Promise<{ history: any[], total: number, totalPages: number }> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return this.historyManager.getProductHistoryByDateRange(startDate, endDate, page, limit);
+    this.ensureInitialized();
+    return this.historyManager!.getProductHistoryByDateRange(startDate, endDate, page, limit);
   }
 
   /**
@@ -585,10 +612,8 @@ export class SafeoutSDK {
     uniqueProducts: number;
     uniqueUsers: number;
   }> {
-    if (!this.historyManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return this.historyManager.getProductHistoryStats();
+    this.ensureInitialized();
+    return this.historyManager!.getProductHistoryStats();
   }
 
   /**
@@ -606,11 +631,12 @@ export class SafeoutSDK {
    * @returns The updated visibility record
    */
   public async updateProductVisibility(
-    type: "public" | "owner" | "brand", 
-    productId: string, 
+    type: "public" | "owner" | "brand",
+    productId: string,
     data: any
   ): Promise<any> {
-    return this.databaseManager.updateProductVisibility(type, productId, data);
+    this.ensureInitialized();
+    return this.databaseManager!.updateProductVisibility(type, productId, data);
   }
 
   /**
@@ -621,33 +647,31 @@ export class SafeoutSDK {
   public async getProductVisibilityHashes(
     productId: string
   ): Promise<{ publicHash: string; ownerHash: string; brandHash: string }> {
-    if (!this.tokenManager) {
-      throw new Error("SDK is not initialized. Call init() first.");
-    }
-    return (this.tokenManager as any).getVisibilityHashes(productId);
+    this.ensureInitialized();
+    return (this.tokenManager! as any).getVisibilityHashes(productId);
   }
 
   // Testing methods - accessing manager methods for test compatibility
   private saveMintConfig(mintAddress: PublicKey): void {
-    return this.mintManager.saveMintConfig(mintAddress);
+    return this.mintManager!.saveMintConfig(mintAddress);
   }
 
   private loadMintConfig(): PublicKey | null {
-    return this.mintManager.loadMintConfig();
+    return this.mintManager!.loadMintConfig();
   }
 
   private async mintExists(mintAddress: PublicKey): Promise<boolean> {
-    return this.mintManager.mintExists(mintAddress);
+    return this.mintManager!.mintExists(mintAddress);
   }
 
   private async initializeMint(): Promise<PublicKey> {
-    return this.mintManager.initializeMint();
+    return this.mintManager!.initializeMint(this.mintAuthorityKeypair!);
   }
 
   private async setupPrisma(): Promise<any> {
     return new Promise((resolve) => {
       // This method is no longer needed with direct PostgreSQL connection
-      resolve(this.databaseManager.getPool());
+      resolve(this.databaseManager!.getPool());
     });
   }
 }
