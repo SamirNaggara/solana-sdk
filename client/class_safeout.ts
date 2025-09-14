@@ -11,10 +11,10 @@ import { ValidationUtils } from "./src/validation";
 import { MintManager } from "./src/mint-manager";
 import { TokenManager } from "./src/token-manager";
 import { HistoryManager } from "./src/history-manager";
-import { ProductInput, CompleteProduct, MintResult } from "./src/types";
+import { ProductInput, CompleteProduct, MintResult, AuthenticityResult } from "./src/types";
 
 // Re-export types for external use
-export type { ProductInput, CompleteProduct, MintResult } from "./src/types";
+export type { ProductInput, CompleteProduct, MintResult, AuthenticityResult } from "./src/types";
 
 /**
  * Configuration interface for SafeoutSDK initialization
@@ -509,10 +509,47 @@ export class SafeoutSDK {
    */
   public async checkAuthenticityOnBlockchain(
     productId: string
-  ): Promise<{ isValid: boolean; reason?: string }> {
+  ): Promise<AuthenticityResult> {
     this.ensureInitialized();
 
     return this.tokenManager!.checkAuthenticityOnBlockchain(productId);
+  }
+
+  /**
+   * Check authenticity of multiple products on blockchain in parallel
+   * @param productIds - Array of product IDs to check
+   * @returns Map of productId to authenticity result
+   */
+  public async checkBatchAuthenticityOnBlockchain(
+    productIds: string[]
+  ): Promise<Map<string, AuthenticityResult>> {
+    this.ensureInitialized();
+
+    const results = new Map<string, AuthenticityResult>();
+
+    // Process all checks in parallel
+    const promises = productIds.map(async (productId) => {
+      try {
+        const result = await this.tokenManager!.checkAuthenticityOnBlockchain(productId);
+        return { productId, result };
+      } catch (error) {
+        return {
+          productId,
+          result: {
+            isValid: false,
+            reason: `Error checking authenticity: ${error instanceof Error ? error.message : String(error)}`
+          } as AuthenticityResult
+        };
+      }
+    });
+
+    // Wait for all promises and build results map
+    const allResults = await Promise.all(promises);
+    allResults.forEach(({ productId, result }) => {
+      results.set(productId, result);
+    });
+
+    return results;
   }
 
   /* ----------------------------------------------------------------------- */

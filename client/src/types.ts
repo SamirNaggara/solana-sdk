@@ -11,6 +11,23 @@ export const SignatureSchema = z.object({
   brand: z.string().min(1, "Brand hash is required"),
 });
 
+/** Enhanced authenticity check result with complete blockchain proof */
+export type AuthenticityResult = {
+  isValid: boolean;
+  reason?: string;
+  signature?: string;
+  hashes?: {
+    publicHash: string;
+    ownerHash: string;
+    brandHash: string;
+  };
+  blockchainData?: {
+    memo: any;
+    transaction?: string;
+    slot?: number;
+  };
+};
+
 // Digital Product Passport (DPP) Types
 
 // Type for fields with integrated accessibility levels

@@ -258,7 +258,7 @@ async function mainLoop() {
   }
   for (;;) {
     console.log(
-      "\nActions : create | update | delete | get | check | batch-create | batch-update | batch-delete | history | history-all | history-stats | visibility | exit"
+      "\nActions : create | update | delete | get | check | batch-check | batch-create | batch-update | batch-delete | history | history-all | history-stats | visibility | exit"
     );
     const action = (await ask("> ")).trim().toLowerCase();
 
@@ -347,7 +347,65 @@ async function mainLoop() {
         }
         case "check": {
           const id = await ask("Product UID : ");
-          console.log(await sdk.checkAuthenticityOnBlockchain(id));
+          const result = await sdk.checkAuthenticityOnBlockchain(id);
+
+          console.log("\n🔍 Authenticity Check Result:");
+          console.log("━".repeat(50));
+          console.log(`Status: ${result.isValid ? "✅ VALID" : "❌ INVALID"}`);
+          console.log(`Reason: ${result.reason || "No reason provided"}`);
+
+          if (result.signature) {
+            console.log(`Signature: ${result.signature}`);
+          }
+
+          if (result.hashes) {
+            console.log("\n🔐 Cryptographic Hashes:");
+            console.log(`  Public:  ${result.hashes.publicHash}`);
+            console.log(`  Owner:   ${result.hashes.ownerHash}`);
+            console.log(`  Brand:   ${result.hashes.brandHash}`);
+          }
+
+          if (result.blockchainData?.memo) {
+            console.log("\n⛓️  Blockchain Data:");
+            console.log(`  Memo: ${JSON.stringify(result.blockchainData.memo, null, 2)}`);
+          }
+
+          console.log("━".repeat(50));
+          break;
+        }
+        case "batch-check": {
+          const ids = await ask("Product UIDs (comma separated) : ");
+          const productIds = ids.split(",").map(id => id.trim()).filter(id => id.length > 0);
+
+          if (productIds.length === 0) {
+            console.log("❌ No valid product IDs provided");
+            break;
+          }
+
+          console.log(`🔍 Checking authenticity for ${productIds.length} products...`);
+          const results = await sdk.checkBatchAuthenticityOnBlockchain(productIds);
+
+          console.log("\n📊 Batch Authenticity Results:");
+          console.log("━".repeat(50));
+
+          results.forEach((result, productId) => {
+            const status = result.isValid ? "✅ VALID" : "❌ INVALID";
+            console.log(`\n📍 ${productId}:`);
+            console.log(`   Status: ${status}`);
+            if (result.reason) {
+              console.log(`   Reason: ${result.reason}`);
+            }
+            if (result.signature) {
+              console.log(`   Signature: ${result.signature.substring(0, 16)}...`);
+            }
+            if (result.hashes) {
+              console.log(`   Hashes: P:${result.hashes.publicHash.substring(0, 8)}.. O:${result.hashes.ownerHash.substring(0, 8)}.. B:${result.hashes.brandHash.substring(0, 8)}..`);
+            }
+          });
+
+          const validCount = Array.from(results.values()).filter(r => r.isValid).length;
+          console.log("━".repeat(50));
+          console.log(`Summary: ${validCount}/${productIds.length} products are valid`);
           break;
         }
         case "batch-create": {

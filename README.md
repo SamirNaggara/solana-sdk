@@ -103,8 +103,44 @@ Validates DPP product data structure using Zod schemas.
 
 ### Blockchain Operations
 
-#### `checkAuthenticityOnBlockchain(productId: string): Promise<boolean>`
-Verifies product authenticity against blockchain records.
+#### `checkAuthenticityOnBlockchain(productId: string): Promise<AuthenticityResult>`
+Verifies product authenticity against blockchain records with complete cryptographic proof.
+
+**Returns:**
+```typescript
+{
+  isValid: boolean;
+  reason?: string;
+  signature?: string;              // Blockchain transaction signature
+  hashes?: {
+    publicHash: string;            // Public metadata hash
+    ownerHash: string;             // Owner metadata hash
+    brandHash: string;             // Brand metadata hash
+  };
+  blockchainData?: {
+    memo: any;                     // Raw memo data from blockchain
+    transaction?: string;          // Transaction ID
+    slot?: number;                 // Block slot number
+  };
+}
+```
+
+#### `checkBatchAuthenticityOnBlockchain(productIds: string[]): Promise<Map<string, AuthenticityResult>>`
+Verifies authenticity of multiple products in parallel with complete proof data.
+
+**Example:**
+```typescript
+const results = await sdk.checkBatchAuthenticityOnBlockchain(['id1', 'id2', 'id3']);
+results.forEach((result, productId) => {
+  console.log(`${productId}: ${result.isValid ? 'VALID' : 'INVALID'}`);
+  if (result.signature) {
+    console.log(`Blockchain proof: ${result.signature}`);
+  }
+  if (result.hashes) {
+    console.log(`Hash verification completed`);
+  }
+});
+```
 
 #### `checkAndTopUpBalance(minBalance?: number): Promise<boolean>`
 Checks and tops up SOL balance if needed (devnet/testnet only).

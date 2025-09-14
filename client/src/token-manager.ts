@@ -18,7 +18,7 @@ import {
 import { createMemoInstruction, MEMO_PROGRAM_ID } from "@solana/spl-memo";
 import { createHash } from "crypto";
 import Bottleneck from "bottleneck";
-import { SignatureSchema, MintResult } from './types';
+import { SignatureSchema, MintResult, AuthenticityResult } from './types';
 import { Pool } from "pg";
 
 export class TokenManager {
@@ -202,20 +202,82 @@ export class TokenManager {
    */
   async checkAuthenticityOnBlockchain(
     productId: string
-  ): Promise<{ isValid: boolean; reason?: string }> {
-    const hashes = await this.getVisibilityHashes(productId);
-    const memo = await this.getMemoFromSignature(productId);
-    const memoData = JSON.parse(memo);
+  ): Promise<AuthenticityResult> {
+    try {
+      const hashes = await this.getVisibilityHashes(productId);
+      const signature = await this.getSignatureFromId(productId) || undefined;
+      const memo = await this.getMemoFromSignature(productId);
+      const memoData = JSON.parse(memo);
 
-    // Check if all hashes match
-    if (memoData.public !== hashes.publicHash)
-      return { isValid: false, reason: "Public hash mismatch" };
-    if (memoData.owner !== hashes.ownerHash)
-      return { isValid: false, reason: "Owner hash mismatch" };
-    if (memoData.brand !== hashes.brandHash)
-      return { isValid: false, reason: "Brand hash mismatch" };
-    
-    return { isValid: true, reason: "All hashes verified successfully" };
+      // Check if all hashes match
+      if (memoData.public !== hashes.publicHash) {
+        return {
+          isValid: false,
+          reason: "Public hash mismatch",
+          signature,
+          hashes: {
+            publicHash: hashes.publicHash,
+            ownerHash: hashes.ownerHash,
+            brandHash: hashes.brandHash
+          },
+          blockchainData: {
+            memo: memoData
+          }
+        };
+      }
+
+      if (memoData.owner !== hashes.ownerHash) {
+        return {
+          isValid: false,
+          reason: "Owner hash mismatch",
+          signature,
+          hashes: {
+            publicHash: hashes.publicHash,
+            ownerHash: hashes.ownerHash,
+            brandHash: hashes.brandHash
+          },
+          blockchainData: {
+            memo: memoData
+          }
+        };
+      }
+
+      if (memoData.brand !== hashes.brandHash) {
+        return {
+          isValid: false,
+          reason: "Brand hash mismatch",
+          signature,
+          hashes: {
+            publicHash: hashes.publicHash,
+            ownerHash: hashes.ownerHash,
+            brandHash: hashes.brandHash
+          },
+          blockchainData: {
+            memo: memoData
+          }
+        };
+      }
+
+      // All checks passed - return complete proof
+      return {
+        isValid: true,
+        reason: "All hashes verified successfully",
+        signature,
+        hashes: {
+          publicHash: hashes.publicHash,
+          ownerHash: hashes.ownerHash,
+          brandHash: hashes.brandHash
+        },
+        blockchainData: {
+          memo: memoData
+        }
+      };
+    } catch (error) {
+      return {
+        isValid: false,
+        reason: `Error during authenticity check: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
   }
 
   /** Hash arbitrary JSON using the configured algorithm */
