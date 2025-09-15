@@ -248,8 +248,6 @@ async function mainLoop() {
       rpcUrl: process.env.SOLANA_RPC_URL, // optional, defaults to devnet
       mintAuthorityPrivateKey: process.env.MINT_AUTHORITY_PRIVATE_KEY, // optional
       ownerPrivateKey: process.env.OWNER_PRIVATE_KEY, // optional
-      mintAuthority: process.env.MINT_AUTHORITY_PUBLIC_KEY, // optional
-      owner: process.env.OWNER_PUBLIC_KEY, // optional
     });
     console.log("✅ SafeoutSDK initialized successfully\n");
   } catch (error) {

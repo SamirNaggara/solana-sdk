@@ -24,8 +24,6 @@ export interface SafeoutConfig {
   rpcUrl?: string; // default: 'https://api.devnet.solana.com'
   mintAuthorityPrivateKey?: string;
   ownerPrivateKey?: string;
-  mintAuthority?: string; // PublicKey as string
-  owner?: string; // PublicKey as string
 }
 
 /**
@@ -66,27 +64,21 @@ export class SafeoutSDK {
     // Create complex objects from simple parameters
     this.connection = new Connection(this.rpcUrl, 'confirmed');
 
-    // Handle mint authority - either from private key or public key string
+    // Handle mint authority - from private key only (public key is derived)
     if (config.mintAuthorityPrivateKey) {
       this.mintAuthorityKeypair = Keypair.fromSecretKey(
         new Uint8Array(JSON.parse(config.mintAuthorityPrivateKey))
       );
-    } else if (config.mintAuthority) {
-      // If only public key provided, create a keypair with dummy secret (can't sign)
-      throw new Error('Public key only provided for mint authority. Private key required for signing transactions.');
     } else {
       // Generate random keypair as default
       this.mintAuthorityKeypair = Keypair.generate();
     }
 
-    // Handle owner - either from private key or public key string
+    // Handle owner - from private key only (public key is derived)
     if (config.ownerPrivateKey) {
       this.ownerKeypair = Keypair.fromSecretKey(
         new Uint8Array(JSON.parse(config.ownerPrivateKey))
       );
-    } else if (config.owner) {
-      // If only public key provided, create a keypair with dummy secret (can't sign)
-      throw new Error('Public key only provided for owner. Private key required for signing transactions.');
     } else {
       // Use mint authority as default owner
       this.ownerKeypair = this.mintAuthorityKeypair;
