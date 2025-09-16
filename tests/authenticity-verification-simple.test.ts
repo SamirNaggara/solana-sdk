@@ -63,7 +63,7 @@ describe('Authenticity Verification Simple Tests', () => {
         repairabilityScore: { value: 7.0, accessibilityLevel: "public" },
         endOfLifeInstructions: { value: "Test disposal", accessibilityLevel: "public" },
         digitalLink: { value: "https://test.com", accessibilityLevel: "public" },
-        signature: { value: "", accessibilityLevel: "public" },
+
         manufacturer: {
           name: { value: "Test Corp", accessibilityLevel: "public" },
           address: { value: "Test Address", accessibilityLevel: "owner" },

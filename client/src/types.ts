@@ -50,7 +50,7 @@ export type CompleteProduct = {
   repairabilityScore: F; // ex: "7/10"
   endOfLifeInstructions: F;
   digitalLink: F;
-  signature: F;
+  // signature removed - it's generated after hash calculation and stored separately
   hash?: F; // <-- seul champ optionnel
 
   manufacturer: {

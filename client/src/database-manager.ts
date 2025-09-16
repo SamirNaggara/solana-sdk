@@ -151,11 +151,11 @@ export class DatabaseManager {
 
       // Create the main product
       const productResult = await client.query(
-        `INSERT INTO dpp_products 
-         ("productId", product_name, date_of_manufacture, place_of_manufacture, 
-          product_category, repairability_score, end_of_life_instructions, 
-          digital_link, manufacturer_id, signature)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO dpp_products
+         ("productId", product_name, date_of_manufacture, place_of_manufacture,
+          product_category, repairability_score, end_of_life_instructions,
+          digital_link, manufacturer_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
         [
           productData.productUid,
@@ -166,8 +166,7 @@ export class DatabaseManager {
           productData.info.repairabilityScore.value,
           productData.info.endOfLifeInstructions.value,
           productData.info.digitalLink.value,
-          manufacturerId,
-          productData.info.signature.value
+          manufacturerId
         ]
       );
 
@@ -293,7 +292,6 @@ export class DatabaseManager {
         repairabilityScore: product.repairability_score,
         endOfLifeInstructions: product.end_of_life_instructions,
         digitalLink: product.digital_link,
-        signature: product.signature,
         manufacturer: {
           id: product.manufacturer_id,
           name: product.manufacturer_name,

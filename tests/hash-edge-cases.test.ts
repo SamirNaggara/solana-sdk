@@ -19,7 +19,7 @@ describe('Hash Edge Cases', () => {
         repairabilityScore: { value: 5.0, accessibilityLevel: "public" },
         endOfLifeInstructions: { value: "Test instructions", accessibilityLevel: "public" },
         digitalLink: { value: "https://test.com", accessibilityLevel: "public" },
-        signature: { value: "", accessibilityLevel: "public" },
+
         manufacturer: {
           name: { value: "Test Corp", accessibilityLevel: "public" },
           address: { value: "Test Address", accessibilityLevel: "public" },
@@ -49,7 +49,7 @@ describe('Hash Edge Cases', () => {
         repairabilityScore: { value: 8.5, accessibilityLevel: "public" },
         endOfLifeInstructions: { value: "♻️ Recycler au centre certifié", accessibilityLevel: "public" },
         digitalLink: { value: "https://test.com/产品", accessibilityLevel: "public" },
-        signature: { value: "", accessibilityLevel: "public" },
+
         manufacturer: {
           name: { value: "Corporation® 环保科技", accessibilityLevel: "public" },
           address: { value: "123 Straße, München", accessibilityLevel: "public" },
@@ -86,7 +86,7 @@ describe('Hash Edge Cases', () => {
         repairabilityScore: { value: 5.0, accessibilityLevel: "public" },
         endOfLifeInstructions: { value: "Test", accessibilityLevel: "public" },
         digitalLink: { value: "https://test.com", accessibilityLevel: "public" },
-        signature: { value: "", accessibilityLevel: "public" },
+
         manufacturer: {
           name: { value: "Test Corp", accessibilityLevel: "public" },
           address: { value: "Test Address", accessibilityLevel: "public" },
@@ -116,7 +116,7 @@ describe('Hash Edge Cases', () => {
         repairabilityScore: { value: 7.5, accessibilityLevel: "public" },
         endOfLifeInstructions: { value: "Instructions with \n\t\r special chars", accessibilityLevel: "public" },
         digitalLink: { value: "https://test.com?param=value&other=123", accessibilityLevel: "public" },
-        signature: { value: "", accessibilityLevel: "public" },
+
         manufacturer: {
           name: { value: "Corp & Co., Ltd.", accessibilityLevel: "public" },
           address: { value: "123 Main St., Apt. #456", accessibilityLevel: "public" },

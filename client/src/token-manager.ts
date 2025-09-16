@@ -222,11 +222,12 @@ export class TokenManager {
       const memo = await this.getMemoFromSignature(productId);
       const memoData = JSON.parse(memo);
 
-      // If productData provided, use calculateProductHash for verification
+      // If productData provided, verify the provided data against blockchain
       if (productData) {
+        // Calculate hashes from provided data using the same logic as public calculateProductHash
         const { ValidationUtils } = require('./validation');
 
-        // Calculate hashes from provided data (same as creation)
+        // Use the exact same format as the public calculateProductHash function
         const completeProduct = {
           ...productData.info,
           id: productData.productUid
@@ -236,11 +237,22 @@ export class TokenManager {
         const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
         const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
 
-        const calculatedHashes = {
+        const clientHashes = {
           publicHash: this.hashObject(JSON.stringify(publicData)),
           ownerHash: this.hashObject(JSON.stringify(ownerData)),
           brandHash: this.hashObject(JSON.stringify(brandData))
         };
+
+        console.log('🔍 VERIFICATION HASH DEBUG:');
+        console.log('Product ID:', productId);
+        console.log('Client Public Hash:', clientHashes.publicHash);
+        console.log('Blockchain Public Hash:', memoData.public);
+        console.log('Client Owner Hash:', clientHashes.ownerHash);
+        console.log('Blockchain Owner Hash:', memoData.owner);
+        console.log('Client Brand Hash:', clientHashes.brandHash);
+        console.log('Blockchain Brand Hash:', memoData.brand);
+
+        const calculatedHashes = clientHashes;
 
         // Compare calculated hashes with blockchain hashes
         if (memoData.public !== calculatedHashes.publicHash) {
@@ -397,17 +409,17 @@ export class TokenManager {
     try {
       const info = await Promise.race([
         this.connection.getAccountInfo(ata, "confirmed"),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error("Timeout getting account info")), 10000)
         )
       ]);
-      
+
       if (info) {
         console.log(`ATA already exists for owner: ${this.owner.toString()}`);
         return null;
       }
     } catch (error) {
-      console.warn(`Error checking ATA existence, proceeding with creation: ${error}`);
+      console.warn(`Error checking ATA existence, proceeding with creation: ${error.message}`);
     }
 
     return createAssociatedTokenAccountInstruction(
@@ -441,8 +453,8 @@ export class TokenManager {
 
       // Convert to the same format used in calculateProductHash
       const completeProduct = {
-        id: productId,
-        ...productData
+        ...productData,
+        id: productId
       };
 
       // Use exactly the same filtering logic as calculateProductHash
@@ -452,11 +464,14 @@ export class TokenManager {
       const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
       const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
 
-      return {
+      const hashes = {
         publicHash: this.hashObject(JSON.stringify(publicData)),
         ownerHash: this.hashObject(JSON.stringify(ownerData)),
         brandHash: this.hashObject(JSON.stringify(brandData))
       };
+
+
+      return hashes;
     } finally {
       client.release();
     }
@@ -505,7 +520,6 @@ export class TokenManager {
       repairabilityScore: { value: product.repairability_score, accessibilityLevel: 'public' },
       endOfLifeInstructions: { value: product.end_of_life_instructions, accessibilityLevel: 'public' },
       digitalLink: { value: product.digital_link, accessibilityLevel: 'public' },
-      signature: { value: product.signature, accessibilityLevel: 'public' },
       manufacturer: {
         name: { value: product.manufacturer_name, accessibilityLevel: 'public' },
         address: { value: product.manufacturer_address, accessibilityLevel: 'owner' },
@@ -708,7 +722,6 @@ export class TokenManager {
     tx.feePayer = payer.publicKey;
     tx.sign(payer);
     const isValid = tx.verifySignatures();
-    console.log('Signature valide ? :', isValid);
     return sendAndConfirmTransaction(this.connection, tx, [payer], {
       skipPreflight: false,
       commitment: "confirmed",
