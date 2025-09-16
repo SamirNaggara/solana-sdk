@@ -143,8 +143,8 @@ export class SafeoutSDK {
 
   /**
    * Calculate product hash for verification purposes
-   * Uses the same algorithm as blockchain verification
-   * @param productData - The product data to hash
+   * Uses the same algorithm as blockchain verification based on DPPField accessibilityLevel
+   * @param productData - The product data to hash (must contain DPPField structures)
    * @returns Object containing public, owner, and brand hashes
    */
   public calculateProductHash(productData: ProductInput): {
@@ -159,10 +159,13 @@ export class SafeoutSDK {
       return createHash(hashAlgo).update(JSON.stringify(obj)).digest("hex");
     };
 
-    // Convert ProductInput to the same format used in getVisibilityHashes
-    const completeProduct = this.convertProductInputToCompleteFormat(productData);
+    // Convert ProductInput format to include the productId as 'id'
+    const completeProduct = {
+      ...productData.info,
+      id: productData.productUid
+    };
 
-    // Filter data by access levels (same logic as getVisibilityHashes)
+    // Filter data by access levels using DPPField accessibilityLevel
     const publicData = ValidationUtils.filterProductByAccess(completeProduct, 'public');
     const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
     const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
@@ -184,6 +187,7 @@ export class SafeoutSDK {
       id: productData.productUid
     };
   }
+
 
   /**
    * Create DPP products (single or multiple)

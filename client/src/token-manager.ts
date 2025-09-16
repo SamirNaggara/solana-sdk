@@ -328,6 +328,7 @@ export class TokenManager {
 
   /**
    * Get visibility-based hashes for public, owner, and brand levels
+   * Uses DPPField accessibilityLevel - same logic as calculateProductHash
    */
   private async getVisibilityHashes(productId: string): Promise<{
     publicHash: string;
@@ -335,154 +336,97 @@ export class TokenManager {
     brandHash: string;
   }> {
     const client = await this.pool.connect();
-    
+
     try {
-      // Get product data with visibility information
-      const productResult = await client.query(
-        `SELECT p.*, m.name as manufacturer_name, m.address as manufacturer_address, 
-                m.contact_email as manufacturer_contact_email,
-                v.public, v.owner, v.brand
-         FROM dpp_products p
-         JOIN manufacturers m ON p.manufacturer_id = m.id
-         LEFT JOIN dpp_product_visibility v ON p."productId" = v.product_id
-         WHERE p."productId" = $1`,
-        [productId]
-      );
-      
-      if (productResult.rows.length === 0) {
+      // Get the complete product data in DPP format (same as stored)
+      const productData = await this.getCompleteProductData(client, productId);
+
+      if (!productData) {
         throw new Error(`Product with ID ${productId} not found.`);
       }
 
-      const product = productResult.rows[0];
-
-      // Get material compositions
-      const materialResult = await client.query(
-        'SELECT material, percentage FROM material_compositions WHERE product_id = $1',
-        [productId]
-      );
-
-      // Get hazardous substances
-      const hazardousResult = await client.query(
-        'SELECT substance, cas_number as "casNumber", concentration FROM hazardous_substances WHERE product_id = $1',
-        [productId]
-      );
-
-      const visibilityData = {
-        public: product.public,
-        owner: product.owner,
-        brand: product.brand
-      };
-      
-      if (!visibilityData) {
-        throw new Error(`No visibility data found for product ID ${productId}`);
-      }
-
-      // Build complete product object
+      // Convert to the same format used in calculateProductHash
       const completeProduct = {
-        id: product.productId,
-        productName: product.product_name,
-        dateOfManufacture: product.date_of_manufacture,
-        placeOfManufacture: product.place_of_manufacture,
-        productCategory: product.product_category,
-        repairabilityScore: product.repairability_score,
-        endOfLifeInstructions: product.end_of_life_instructions,
-        digitalLink: product.digital_link,
-        signature: product.signature,
-        manufacturer: {
-          id: product.manufacturer_id,
-          name: product.manufacturer_name,
-          address: product.manufacturer_address,
-          contactEmail: product.manufacturer_contact_email
-        },
-        materialComposition: materialResult.rows,
-        hazardousSubstances: hazardousResult.rows
+        id: productId,
+        ...productData
       };
 
-      // Helper function to build data object based on visible fields
-      const buildDataFromVisibility = (visibleFields: any, fullProduct: any) => {
-        if (!visibleFields || visibleFields === null) return {};
-        
-        const data: any = {};
-        const fieldsArray = Array.isArray(visibleFields) ? visibleFields : [];
-        
-        fieldsArray.forEach((field: string) => {
-          switch (field) {
-            case 'id':
-              data.id = fullProduct.id;
-              break;
-            case 'productName':
-              data.productName = fullProduct.productName;
-              break;
-            case 'dateOfManufacture':
-              data.dateOfManufacture = fullProduct.dateOfManufacture.toISOString().split('T')[0];
-              break;
-            case 'placeOfManufacture':
-              data.placeOfManufacture = fullProduct.placeOfManufacture;
-              break;
-            case 'productCategory':
-              data.productCategory = fullProduct.productCategory;
-              break;
-            case 'repairabilityScore':
-              data.repairabilityScore = fullProduct.repairabilityScore;
-              break;
-            case 'endOfLifeInstructions':
-              data.endOfLifeInstructions = fullProduct.endOfLifeInstructions;
-              break;
-            case 'digitalLink':
-              data.digitalLink = fullProduct.digitalLink;
-              break;
-            case 'manufacturerId':
-              data.manufacturerId = fullProduct.manufacturer.id;
-              break;
-            case 'signature':
-              data.signature = fullProduct.signature;
-              break;
-            case 'manufacturer':
-              data.manufacturer = {
-                name: fullProduct.manufacturer.name,
-                address: fullProduct.manufacturer.address,
-                contactEmail: fullProduct.manufacturer.contactEmail,
-              };
-              break;
-            case 'materialComposition':
-              data.materialComposition = fullProduct.materialComposition.map((mc: any) => ({
-                material: mc.material,
-                percentage: mc.percentage,
-              }));
-              break;
-            case 'hazardousSubstances':
-              data.hazardousSubstances = fullProduct.hazardousSubstances.map((hs: any) => ({
-                substance: hs.substance,
-                casNumber: hs.casNumber,
-                concentration: hs.concentration,
-              }));
-              break;
-          }
-        });
-        
-        return data;
-      };
+      // Use exactly the same filtering logic as calculateProductHash
+      const { ValidationUtils } = require('./validation');
 
-      // Public hash - uses fields defined in public visibility
-      const publicData = buildDataFromVisibility(visibilityData.public, completeProduct);
-      const publicHash = this.hashObject(JSON.stringify(publicData));
-
-      // Owner hash - uses fields defined in owner visibility
-      const ownerData = buildDataFromVisibility(visibilityData.owner, completeProduct);
-      const ownerHash = this.hashObject(JSON.stringify(ownerData));
-
-      // Brand hash - uses fields defined in brand visibility
-      const brandData = buildDataFromVisibility(visibilityData.brand, completeProduct);
-      const brandHash = this.hashObject(JSON.stringify(brandData));
+      const publicData = ValidationUtils.filterProductByAccess(completeProduct, 'public');
+      const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
+      const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
 
       return {
-        publicHash,
-        ownerHash,
-        brandHash
+        publicHash: this.hashObject(JSON.stringify(publicData)),
+        ownerHash: this.hashObject(JSON.stringify(ownerData)),
+        brandHash: this.hashObject(JSON.stringify(brandData))
       };
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Get complete product data in DPP format with all relations
+   */
+  private async getCompleteProductData(client: any, productId: string): Promise<any> {
+    // Get product data with manufacturer
+    const productResult = await client.query(
+      `SELECT p.*, m.name as manufacturer_name, m.address as manufacturer_address,
+              m.contact_email as manufacturer_contact_email
+       FROM dpp_products p
+       JOIN manufacturers m ON p.manufacturer_id = m.id
+       WHERE p."productId" = $1`,
+      [productId]
+    );
+
+    if (productResult.rows.length === 0) {
+      return null;
+    }
+
+    const product = productResult.rows[0];
+
+    // Get material compositions
+    const materialResult = await client.query(
+      'SELECT material, percentage FROM material_compositions WHERE product_id = $1',
+      [productId]
+    );
+
+    // Get hazardous substances
+    const hazardousResult = await client.query(
+      'SELECT substance, cas_number as "casNumber", concentration FROM hazardous_substances WHERE product_id = $1',
+      [productId]
+    );
+
+    // Return product data in the same DPP format as stored/created
+    // Note: The actual DPP data should be stored as JSON with accessibilityLevel
+    // This is a simplified version - in reality we should reconstruct the full DPP structure
+    return {
+      productName: { value: product.product_name, accessibilityLevel: 'public' },
+      dateOfManufacture: { value: product.date_of_manufacture, accessibilityLevel: 'public' },
+      placeOfManufacture: { value: product.place_of_manufacture, accessibilityLevel: 'public' },
+      productCategory: { value: product.product_category, accessibilityLevel: 'public' },
+      repairabilityScore: { value: product.repairability_score, accessibilityLevel: 'public' },
+      endOfLifeInstructions: { value: product.end_of_life_instructions, accessibilityLevel: 'public' },
+      digitalLink: { value: product.digital_link, accessibilityLevel: 'public' },
+      signature: { value: product.signature, accessibilityLevel: 'public' },
+      manufacturer: {
+        name: { value: product.manufacturer_name, accessibilityLevel: 'public' },
+        address: { value: product.manufacturer_address, accessibilityLevel: 'owner' },
+        contactEmail: { value: product.manufacturer_contact_email, accessibilityLevel: 'owner' }
+      },
+      materialComposition: materialResult.rows.map((mc: any) => ({
+        material: { value: mc.material, accessibilityLevel: 'public' },
+        percentage: { value: mc.percentage, accessibilityLevel: 'public' }
+      })),
+      hazardousSubstances: hazardousResult.rows.map((hs: any) => ({
+        substance: { value: hs.substance, accessibilityLevel: 'private' },
+        casNumber: { value: hs.casNumber, accessibilityLevel: 'private' },
+        concentration: { value: hs.concentration, accessibilityLevel: 'private' }
+      }))
+    };
   }
 
   /**

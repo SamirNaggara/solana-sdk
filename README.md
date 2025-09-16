@@ -101,6 +101,18 @@ Retrieves products with access-level filtering.
 #### `validateDppProductData(productData: ProductInput): ProductInput`
 Validates DPP product data structure using Zod schemas.
 
+#### `normalizeUserName(userName?: string): string`
+Normalizes user names for consistency (lowercase, trimmed, defaults to 'system' if empty).
+
+**Example:**
+```typescript
+const normalizedUser = sdk.normalizeUserName("  John DOE  ");
+console.log(normalizedUser); // "john doe"
+
+const defaultUser = sdk.normalizeUserName("");
+console.log(defaultUser); // "system"
+```
+
 ### Blockchain Operations
 
 #### `calculateProductHash(productData: ProductInput): { publicHash: string; ownerHash: string; brandHash: string; }`
