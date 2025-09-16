@@ -1,6 +1,8 @@
-# SafeoutSDK
+# solana-dpp
 
-SafeoutSDK is a TypeScript SDK for creating, verifying, and managing Solana SPL tokens with secure metadata storage via memo instructions. The project enables minting tokens with embedded hashed metadata and provides a complete API for managing digital product passports (DPP) on the Solana blockchain.
+**TypeScript SDK for creating and managing Digital Product Passports (DPP) on Solana blockchain with secure metadata storage.**
+
+The `solana-dpp` SDK enables minting SPL tokens with embedded hashed metadata via memo instructions and provides a complete API for managing digital product passports on the Solana blockchain.
 
 ## Features
 
@@ -16,13 +18,13 @@ SafeoutSDK is a TypeScript SDK for creating, verifying, and managing Solana SPL 
 ### Installation
 
 ```bash
-npm install # Project dependencies
+npm install solana-dpp
 ```
 
 ### Basic Usage
 
 ```typescript
-import { SafeoutSDK } from './client/class_safeout';
+import { SafeoutSDK } from 'solana-dpp';
 
 const sdk = new SafeoutSDK();
 
@@ -48,8 +50,6 @@ interface SafeoutConfig {
   rpcUrl?: string;                       // Optional: Solana RPC (default: devnet)
   mintAuthorityPrivateKey?: string;      // Optional: Private key as JSON array
   ownerPrivateKey?: string;              // Optional: Owner private key
-  mintAuthority?: string;                // Optional: Public key as string
-  owner?: string;                        // Optional: Owner public key as string
 }
 ```
 
@@ -102,6 +102,27 @@ Retrieves products with access-level filtering.
 Validates DPP product data structure using Zod schemas.
 
 ### Blockchain Operations
+
+#### `calculateProductHash(productData: ProductInput): { publicHash: string; ownerHash: string; brandHash: string; }`
+Calculates product hashes for verification purposes using the same algorithm as blockchain verification. This function can be used client-side to verify data integrity without requiring database access.
+
+**Example:**
+```typescript
+const hashes = sdk.calculateProductHash({
+  productUid: "abc-123",
+  info: {
+    productName: { value: "EcoLaptop", accessibilityLevel: "public" },
+    manufacturer: {
+      name: { value: "GreenTech", accessibilityLevel: "public" }
+    }
+    // ... other DPP fields
+  }
+});
+
+console.log(hashes.publicHash);  // Hash for public-level data
+console.log(hashes.ownerHash);   // Hash for owner-level data
+console.log(hashes.brandHash);   // Hash for private/brand-level data
+```
 
 #### `checkAuthenticityOnBlockchain(productId: string): Promise<AuthenticityResult>`
 Verifies product authenticity against blockchain records with complete cryptographic proof.
