@@ -268,9 +268,8 @@ async function mainLoop() {
           );
           // First validate the data
           const validatedData = sdk.validateDppProductData(demoUniqueProduct);
-          console.log(
-            await sdk.createDppProducts(validatedData, changedBy || "cli-user")
-          );
+          const results = await sdk.createDppProducts([validatedData], changedBy || "cli-user");
+          console.log(results[0]);
           break;
         }
         case "update": {
@@ -280,9 +279,8 @@ async function mainLoop() {
           const changedBy = await ask(
             "Changed by (optional, press Enter for 'cli-user') : "
           );
-          console.log(
-            await sdk.updateDppProducts(id, info, changedBy || "cli-user")
-          );
+          const results = await sdk.updateDppProducts([{ productId: id, updateData: { info } }], changedBy || "cli-user");
+          console.log(results[0]);
           break;
         }
         case "delete": {
@@ -294,7 +292,7 @@ async function mainLoop() {
             const changedBy = await ask(
               "Changed by (optional, press Enter for 'cli-user') : "
             );
-            await sdk.deleteDppProducts(id, changedBy || "cli-user");
+            await sdk.deleteDppProducts([id], changedBy || "cli-user");
             console.log("Product deleted successfully.");
           } else {
             console.log("Deletion cancelled.");
@@ -313,10 +311,11 @@ async function mainLoop() {
           }
 
           try {
-            const completeProduct = await sdk.getDppProducts(
-              id,
+            const products = await sdk.getDppProducts(
+              [id],
               accessLevel as "public" | "owner" | "private"
             );
+            const completeProduct = products[0];
             console.log(`\n Complete Product Data (Access: ${accessLevel}):`);
             console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             console.log(JSON.stringify(completeProduct, null, 2));
@@ -347,45 +346,51 @@ async function mainLoop() {
           const id = await ask("Product UID : ");
           const withData = await ask("Verify with original data? (y/N) : ");
 
-          let result;
+          let results;
           if (withData.toLowerCase() === 'y' || withData.toLowerCase() === 'yes') {
             // Use demo data for verification (in real app, user would provide original data)
             const productData = demoProducts.find(p => p.productUid === id) || demoUniqueProduct;
-            result = await sdk.checkAuthenticityOnBlockchain(id, {
-              productData: { productUid: id, info: productData.info },
-              changedBy: "cli-user"
-            });
+            results = await sdk.checkAuthenticityOnBlockchain([{
+              productId: id,
+              productData: { productUid: id, info: productData.info }
+            }]);
           } else {
-            result = await sdk.checkAuthenticityOnBlockchain(id);
+            results = await sdk.checkAuthenticityOnBlockchain([{ productId: id }]);
           }
+
+          const result = results.get(id);
 
           console.log("\n🔍 Authenticity Check Result:");
           console.log("━".repeat(50));
 
-          // Blockchain status
-          console.log(`Blockchain: ${result.isOnBlockchain ? "✅ ON BLOCKCHAIN" : "❌ NOT ON BLOCKCHAIN"}`);
+          if (result) {
+            // Blockchain status
+            console.log(`Blockchain: ${result.isOnBlockchain ? "✅ ON BLOCKCHAIN" : "❌ NOT ON BLOCKCHAIN"}`);
 
-          // Validity status (only relevant if on blockchain)
-          if (result.isOnBlockchain) {
-            console.log(`Validity: ${result.isValid ? "✅ VALID (Hash Match)" : "❌ INVALID (Hash Mismatch)"}`);
-          }
+            // Validity status (only relevant if on blockchain)
+            if (result.isOnBlockchain) {
+              console.log(`Validity: ${result.isValid ? "✅ VALID (Hash Match)" : "❌ INVALID (Hash Mismatch)"}`);
+            }
 
-          console.log(`Reason: ${result.reason || "No reason provided"}`);
+            console.log(`Reason: ${result.reason || "No reason provided"}`);
 
-          if (result.signature) {
-            console.log(`Signature: ${result.signature}`);
-          }
+            if (result.signature) {
+              console.log(`Signature: ${result.signature}`);
+            }
 
-          if (result.hashes) {
-            console.log("\n🔐 Cryptographic Hashes:");
-            console.log(`  Public:  ${result.hashes.publicHash}`);
-            console.log(`  Owner:   ${result.hashes.ownerHash}`);
-            console.log(`  Brand:   ${result.hashes.brandHash}`);
-          }
+            if (result.hashes) {
+              console.log("\n🔐 Cryptographic Hashes:");
+              console.log(`  Public:  ${result.hashes.publicHash}`);
+              console.log(`  Owner:   ${result.hashes.ownerHash}`);
+              console.log(`  Brand:   ${result.hashes.brandHash}`);
+            }
 
-          if (result.blockchainData?.memo) {
-            console.log("\n⛓️  Blockchain Data:");
-            console.log(`  Memo: ${JSON.stringify(result.blockchainData.memo, null, 2)}`);
+            if (result.blockchainData?.memo) {
+              console.log("\n⛓️  Blockchain Data:");
+              console.log(`  Memo: ${JSON.stringify(result.blockchainData.memo, null, 2)}`);
+            }
+          } else {
+            console.log("❌ No result found for the product ID");
           }
 
           console.log("━".repeat(50));
@@ -401,7 +406,7 @@ async function mainLoop() {
           }
 
           console.log(`🔍 Checking authenticity for ${productIds.length} products...`);
-          const results = await sdk.checkBatchAuthenticityOnBlockchain(productIds);
+          const results = await sdk.checkAuthenticityOnBlockchain(productIds.map(id => ({ productId: id })));
 
           console.log("\n📊 Batch Authenticity Results:");
           console.log("━".repeat(50));

@@ -419,7 +419,7 @@ export class TokenManager {
         return null;
       }
     } catch (error) {
-      console.warn(`Error checking ATA existence, proceeding with creation: ${error.message}`);
+      console.warn(`Error checking ATA existence, proceeding with creation: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return createAssociatedTokenAccountInstruction(
