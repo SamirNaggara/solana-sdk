@@ -199,15 +199,104 @@ export class TokenManager {
 
   /**
    * Check authenticity on blockchain
+   * @param productId - Product ID to check
+   * @param productData - Optional product data to verify hash against (for complete verification)
    */
   async checkAuthenticityOnBlockchain(
-    productId: string
+    productId: string,
+    productData?: any
   ): Promise<AuthenticityResult> {
     try {
-      const hashes = await this.getVisibilityHashes(productId);
-      const signature = await this.getSignatureFromId(productId) || undefined;
+      // First, check if product has a signature (exists on blockchain)
+      const signature = await this.getSignatureFromId(productId);
+
+      if (!signature || signature === "" || signature === "demo-signature-placeholder") {
+        return {
+          isOnBlockchain: false,
+          isValid: false,
+          reason: "Product not found on blockchain (no signature)"
+        };
+      }
+
+      // Product exists on blockchain, now get blockchain data
       const memo = await this.getMemoFromSignature(productId);
       const memoData = JSON.parse(memo);
+
+      // If productData provided, use calculateProductHash for verification
+      if (productData) {
+        const { ValidationUtils } = require('./validation');
+
+        // Calculate hashes from provided data (same as creation)
+        const completeProduct = {
+          ...productData.info,
+          id: productData.productUid
+        };
+
+        const publicData = ValidationUtils.filterProductByAccess(completeProduct, 'public');
+        const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
+        const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
+
+        const calculatedHashes = {
+          publicHash: this.hashObject(JSON.stringify(publicData)),
+          ownerHash: this.hashObject(JSON.stringify(ownerData)),
+          brandHash: this.hashObject(JSON.stringify(brandData))
+        };
+
+        // Compare calculated hashes with blockchain hashes
+        if (memoData.public !== calculatedHashes.publicHash) {
+          return {
+            isOnBlockchain: true,
+            isValid: false,
+            reason: "Public hash mismatch - data has been modified",
+            signature,
+            hashes: calculatedHashes,
+            blockchainData: {
+              memo: memoData
+            }
+          };
+        }
+
+        if (memoData.owner !== calculatedHashes.ownerHash) {
+          return {
+            isOnBlockchain: true,
+            isValid: false,
+            reason: "Owner hash mismatch - data has been modified",
+            signature,
+            hashes: calculatedHashes,
+            blockchainData: {
+              memo: memoData
+            }
+          };
+        }
+
+        if (memoData.brand !== calculatedHashes.brandHash) {
+          return {
+            isOnBlockchain: true,
+            isValid: false,
+            reason: "Brand hash mismatch - data has been modified",
+            signature,
+            hashes: calculatedHashes,
+            blockchainData: {
+              memo: memoData
+            }
+          };
+        }
+
+        // All hashes match - data is authentic
+        return {
+          isOnBlockchain: true,
+          isValid: true,
+          reason: "All hashes verified successfully - data is authentic",
+          signature,
+          hashes: calculatedHashes,
+          blockchainData: {
+            memo: memoData
+          }
+        };
+      }
+
+      // No productData provided - just check existence and get stored hashes
+      const hashes = await this.getVisibilityHashes(productId);
 
       // Check if all hashes match
       if (memoData.public !== hashes.publicHash) {

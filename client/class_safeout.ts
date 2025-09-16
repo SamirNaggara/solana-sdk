@@ -546,14 +546,18 @@ export class SafeoutSDK {
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Check authenticity on blockchain
+   * Check authenticity on blockchain with optional data verification
+   * @param productId - Product ID to verify
+   * @param productData - Optional product data to verify hash against (for complete verification)
+   * @returns Complete authenticity verification result
    */
   public async checkAuthenticityOnBlockchain(
-    productId: string
+    productId: string,
+    productData?: any
   ): Promise<AuthenticityResult> {
     this.ensureInitialized();
 
-    return this.tokenManager!.checkAuthenticityOnBlockchain(productId);
+    return this.tokenManager!.checkAuthenticityOnBlockchain(productId, productData);
   }
 
   /**

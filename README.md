@@ -168,8 +168,12 @@ if (result.hashes?.publicHash === expectedHashes.publicHash) {
 }
 ```
 
-#### `checkAuthenticityOnBlockchain(productId: string): Promise<AuthenticityResult>`
+#### `checkAuthenticityOnBlockchain(productId: string, productData?: ProductInput): Promise<AuthenticityResult>`
 Verifies product authenticity against blockchain records with complete cryptographic proof.
+
+**Two modes of operation:**
+- **Simple mode** (no productData): Only checks if product exists on blockchain
+- **Complete mode** (with productData): Verifies hashes match between provided data and blockchain records
 
 **Returns:**
 ```typescript
@@ -346,6 +350,48 @@ Available actions:
 - **MintManager** - Token minting operations
 - **HistoryManager** - Change tracking
 - **ValidationUtils** - Data validation
+
+## Testing
+
+The SDK includes comprehensive test suites covering all functionality:
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test categories
+npm run test:mint              # Mint management tests
+npm run test:authenticity      # Authenticity verification tests
+npm run test:user-normalization # User normalization tests
+
+# Run in watch mode
+npm run test:watch
+```
+
+### Test Categories
+
+- **Hash Calculation Tests**: Pure hash computation without database dependencies
+- **Integration Tests**: Full workflow with PostgreSQL database
+- **Authenticity Verification**: Blockchain verification logic
+- **Edge Cases**: Unicode, special characters, and boundary conditions
+- **Performance Tests**: Hash calculation performance benchmarks
+
+### Test Database Setup
+
+For integration tests, a PostgreSQL test database is automatically configured:
+
+```bash
+# Start test database with Docker
+docker run -d --name solana-dpp-test-db \
+  -e POSTGRES_DB=sdk-1 \
+  -e POSTGRES_USER=safeout \
+  -e POSTGRES_PASSWORD=pide \
+  -p 4242:5432 postgres:15-alpine
+```
+
+The test suite includes both unit tests (no external dependencies) and integration tests (with database).
 
 ## License
 

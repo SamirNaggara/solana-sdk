@@ -345,7 +345,19 @@ async function mainLoop() {
         }
         case "check": {
           const id = await ask("Product UID : ");
-          const result = await sdk.checkAuthenticityOnBlockchain(id);
+          const withData = await ask("Verify with original data? (y/N) : ");
+
+          let result;
+          if (withData.toLowerCase() === 'y' || withData.toLowerCase() === 'yes') {
+            // Use demo data for verification (in real app, user would provide original data)
+            const productData = demoProducts.find(p => p.productUid === id) || demoUniqueProduct;
+            result = await sdk.checkAuthenticityOnBlockchain(id, {
+              productData: { productUid: id, info: productData.info },
+              changedBy: "cli-user"
+            });
+          } else {
+            result = await sdk.checkAuthenticityOnBlockchain(id);
+          }
 
           console.log("\n🔍 Authenticity Check Result:");
           console.log("━".repeat(50));
