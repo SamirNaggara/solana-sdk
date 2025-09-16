@@ -116,7 +116,18 @@ console.log(defaultUser); // "system"
 ### Blockchain Operations
 
 #### `calculateProductHash(productData: ProductInput): { publicHash: string; ownerHash: string; brandHash: string; }`
-Calculates product hashes for verification purposes using the same algorithm as blockchain verification. This function can be used client-side to verify data integrity without requiring database access.
+Calculates product hashes for verification purposes using **exactly the same algorithm** as blockchain verification. This function provides perfect hash synchronization between client-side verification and blockchain storage.
+
+**Key Features:**
+- ✅ **Perfect Synchronization**: Produces identical hashes to blockchain operations
+- ✅ **DPPField Based**: Uses `accessibilityLevel` from DPPField structures exclusively
+- ✅ **Client-side Verification**: No database access required
+- ✅ **Same SHA256 Algorithm**: Identical to blockchain hash calculation
+
+**Hash Levels:**
+- `publicHash`: Only fields with `accessibilityLevel: 'public'`
+- `ownerHash`: Fields with `accessibilityLevel: 'public'` OR `'owner'`
+- `brandHash`: All fields (`'public'`, `'owner'`, and `'private'`)
 
 **Example:**
 ```typescript
@@ -125,15 +136,36 @@ const hashes = sdk.calculateProductHash({
   info: {
     productName: { value: "EcoLaptop", accessibilityLevel: "public" },
     manufacturer: {
-      name: { value: "GreenTech", accessibilityLevel: "public" }
-    }
+      name: { value: "GreenTech", accessibilityLevel: "public" },
+      contactEmail: { value: "contact@greentech.com", accessibilityLevel: "owner" }
+    },
+    hazardousSubstances: [{
+      substance: { value: "Lead", accessibilityLevel: "private" },
+      concentration: { value: "0.08%", accessibilityLevel: "private" }
+    }]
     // ... other DPP fields
   }
 });
 
-console.log(hashes.publicHash);  // Hash for public-level data
-console.log(hashes.ownerHash);   // Hash for owner-level data
-console.log(hashes.brandHash);   // Hash for private/brand-level data
+console.log(hashes.publicHash);  // Hash of: productName, manufacturer.name
+console.log(hashes.ownerHash);   // Hash of: above + manufacturer.contactEmail
+console.log(hashes.brandHash);   // Hash of: above + hazardousSubstances
+
+// ✅ These hashes will EXACTLY match what's stored on blockchain!
+```
+
+**Verification Workflow:**
+```typescript
+// 1. Calculate expected hash client-side
+const expectedHashes = sdk.calculateProductHash(productData);
+
+// 2. Check against blockchain
+const result = await sdk.checkAuthenticityOnBlockchain("abc-123");
+
+// 3. Perfect match verification
+if (result.hashes?.publicHash === expectedHashes.publicHash) {
+  console.log("✅ Hash verification successful - data is authentic!");
+}
 ```
 
 #### `checkAuthenticityOnBlockchain(productId: string): Promise<AuthenticityResult>`
