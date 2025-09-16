@@ -190,56 +190,22 @@ export class SafeoutSDK {
 
 
   /**
-   * Create DPP products (single or multiple)
+   * Create DPP products (batch only - use array with single element for one product)
    */
-  public async createDppProducts(productData: ProductInput, changedBy?: string): Promise<CompleteProduct>;
-  public async createDppProducts(productsData: ProductInput[], changedBy?: string): Promise<CompleteProduct[]>;
-  public async createDppProducts(
-    data: ProductInput | ProductInput[],
-    changedBy?: string
-  ): Promise<CompleteProduct | CompleteProduct[]> {
+  public async createDppProducts(productsData: ProductInput[], changedBy?: string): Promise<CompleteProduct[]> {
     this.ensureInitialized();
-
-    // Handle single product
-    if (!Array.isArray(data)) {
-      return this.createSingleProduct(data, changedBy);
-    }
-
-    // Handle multiple products
-    return this.createMultipleProducts(data, changedBy);
-  }
-
-  private async createSingleProduct(productData: ProductInput, changedBy?: string): Promise<CompleteProduct> {
-    // Check if product already exists
-    const existingProduct = await this.databaseManager!.getFullProductData(productData.productUid);
-    if (existingProduct) {
-      throw new Error(`Product with ID ${productData.productUid} already exists.`);
-    }
-
-    // Create product in database
-    const product = await this.databaseManager!.createProductWithRelations(productData);
-
-    // Create blockchain token
-    const mintResult = await this.tokenManager!.createMintToken(product.id, this.mintAuthorityKeypair!);
-
-    // Record in history
-    await this.historyManager!.recordProductHistory(
-      product.id,
-      'CREATE',
-      null,
-      product,
-      ValidationUtils.normalizeUserName(changedBy),
-      'Product created'
-    );
-
-    return {
-      ...product,
-      signature: mintResult.signature,
-      hash: mintResult.hash,
-    };
+    return this.createMultipleProducts(productsData, changedBy);
   }
 
   private async createMultipleProducts(productsData: ProductInput[], changedBy?: string): Promise<CompleteProduct[]> {
+    // Check if any products already exist
+    for (const productData of productsData) {
+      const existingProduct = await this.databaseManager!.getFullProductData(productData.productUid);
+      if (existingProduct) {
+        throw new Error(`Product with ID ${productData.productUid} already exists.`);
+      }
+    }
+
     // Create all products in database
     const createdProducts = await Promise.all(
       productsData.map((productInput: ProductInput) =>
@@ -278,70 +244,16 @@ export class SafeoutSDK {
   }
 
   /**
-   * Update DPP products (single or multiple)
+   * Update DPP products (batch only - use array with single element for one product)
    */
-  public async updateDppProducts(
-    productId: string,
-    updateData: Partial<ProductInput>,
-    changedBy?: string
-  ): Promise<CompleteProduct>;
   public async updateDppProducts(
     updates: Array<{ productId: string; updateData: Partial<ProductInput> }>,
     changedBy?: string
-  ): Promise<CompleteProduct[]>;
-  public async updateDppProducts(
-    data: string | Array<{ productId: string; updateData: Partial<ProductInput> }>,
-    updateDataOrChangedBy?: Partial<ProductInput> | string,
-    changedBy?: string
-  ): Promise<CompleteProduct | CompleteProduct[]> {
+  ): Promise<CompleteProduct[]> {
     this.ensureInitialized();
-
-    // Handle single product update
-    if (typeof data === 'string') {
-      const productId = data;
-      const updateData = updateDataOrChangedBy as Partial<ProductInput>;
-      return this.updateSingleProduct(productId, updateData, changedBy);
-    }
-
-    // Handle multiple products update
-    const updates = data;
-    const changedByUser = updateDataOrChangedBy as string;
-    return this.updateMultipleProducts(updates, changedByUser);
+    return this.updateMultipleProducts(updates, changedBy);
   }
 
-  private async updateSingleProduct(
-    productId: string,
-    updateData: Partial<ProductInput>,
-    changedBy?: string
-  ): Promise<CompleteProduct> {
-    // Get existing product for history
-    const existingProduct = await this.databaseManager!.getFullProductData(productId);
-    if (!existingProduct) {
-      throw new Error(`Product with ID ${productId} not found.`);
-    }
-
-    // Update product in database
-    const updatedProduct = await this.databaseManager!.updateProductById(productId, updateData);
-
-    // Update blockchain token
-    const mintResult = await this.tokenManager!.updateMintToken(productId, this.mintAuthorityKeypair!);
-
-    // Record in history
-    await this.historyManager!.recordProductHistory(
-      productId,
-      'UPDATE',
-      existingProduct,
-      updatedProduct,
-      ValidationUtils.normalizeUserName(changedBy),
-      'Product updated'
-    );
-
-    return {
-      ...updatedProduct,
-      signature: mintResult.signature,
-      hash: mintResult.hash,
-    };
-  }
 
   private async updateMultipleProducts(
     updates: Array<{ productId: string; updateData: Partial<ProductInput> }>,
@@ -390,42 +302,13 @@ export class SafeoutSDK {
   }
 
   /**
-   * Delete DPP products (single or multiple)
+   * Delete DPP products (batch only - use array with single element for one product)
    */
-  public async deleteDppProducts(productId: string, changedBy?: string): Promise<void>;
-  public async deleteDppProducts(productIds: string[], changedBy?: string): Promise<void>;
-  public async deleteDppProducts(data: string | string[], changedBy?: string): Promise<void> {
+  public async deleteDppProducts(productIds: string[], changedBy?: string): Promise<void> {
     this.ensureInitialized();
-
-    // Handle single product deletion
-    if (typeof data === 'string') {
-      return this.deleteSingleProduct(data, changedBy);
-    }
-
-    // Handle multiple products deletion
-    return this.deleteMultipleProducts(data, changedBy);
+    return this.deleteMultipleProducts(productIds, changedBy);
   }
 
-  private async deleteSingleProduct(productId: string, changedBy?: string): Promise<void> {
-    // Get existing product for history
-    const existingProduct = await this.databaseManager!.getFullProductData(productId);
-    if (!existingProduct) {
-      throw new Error(`Product with ID ${productId} not found.`);
-    }
-
-    // Record deletion in history before deleting
-    await this.historyManager!.recordProductHistory(
-      productId,
-      'DELETE',
-      existingProduct,
-      null,
-      ValidationUtils.normalizeUserName(changedBy),
-      'Product deleted'
-    );
-
-    // Delete from database
-    await this.databaseManager!.deleteProductWithRelations(productId);
-  }
 
   private async deleteMultipleProducts(productIds: string[], changedBy?: string): Promise<void> {
     // Get existing products data for history
@@ -462,63 +345,14 @@ export class SafeoutSDK {
   }
 
   /**
-   * Get DPP products (single or multiple)
+   * Get DPP products (batch only - use array with single element for one product)
    */
   public async getDppProducts(
-    productId: string,
-    userAccessLevel?: 'public' | 'owner' | 'private'
-  ): Promise<CompleteProduct>;
-  public async getDppProducts(
     productIds: string[],
-    userAccessLevel?: 'public' | 'owner' | 'private'
-  ): Promise<CompleteProduct[]>;
-  public async getDppProducts(
-    data: string | string[],
     userAccessLevel: 'public' | 'owner' | 'private' = 'public'
-  ): Promise<CompleteProduct | CompleteProduct[]> {
+  ): Promise<CompleteProduct[]> {
     this.ensureInitialized();
-
-    // Handle single product
-    if (typeof data === 'string') {
-      return this.getSingleProduct(data, userAccessLevel);
-    }
-
-    // Handle multiple products
-    return this.getMultipleProducts(data, userAccessLevel);
-  }
-
-  private async getSingleProduct(
-    productId: string,
-    userAccessLevel: 'public' | 'owner' | 'private'
-  ): Promise<CompleteProduct> {
-    // Get the basic product data
-    const product = await this.databaseManager!.getFullProductData(productId);
-
-    if (!product) {
-      throw new Error(`Product with ID ${productId} not found.`);
-    }
-
-    // Apply access level filtering using ValidationUtils
-    const filteredProduct = ValidationUtils.filterProductByAccess(product, userAccessLevel);
-
-    // Get history data (only for owner/private access)
-    let history: any[] = [];
-    if (userAccessLevel === 'owner' || userAccessLevel === 'private') {
-      history = await this.historyManager!.getProductHistory(productId) || [];
-    }
-
-    return {
-      ...filteredProduct,
-      history: history.length > 0 ? history.map((h: any) => ({
-        id: h.id,
-        action: h.action,
-        changed_by: h.changed_by,
-        change_timestamp: h.change_timestamp,
-        previous_data: h.previous_data,
-        new_data: h.new_data,
-        change_description: h.change_description
-      })) : undefined
-    };
+    return this.getMultipleProducts(productIds, userAccessLevel);
   }
 
   private async getMultipleProducts(
@@ -529,7 +363,34 @@ export class SafeoutSDK {
     const products = await Promise.all(
       productIds.map(async (productId) => {
         try {
-          return await this.getSingleProduct(productId, userAccessLevel);
+          // Get the basic product data
+          const product = await this.databaseManager!.getFullProductData(productId);
+
+          if (!product) {
+            throw new Error(`Product with ID ${productId} not found.`);
+          }
+
+          // Apply access level filtering using ValidationUtils
+          const filteredProduct = ValidationUtils.filterProductByAccess(product, userAccessLevel);
+
+          // Get history data (only for owner/private access)
+          let history: any[] = [];
+          if (userAccessLevel === 'owner' || userAccessLevel === 'private') {
+            history = await this.historyManager!.getProductHistory(productId) || [];
+          }
+
+          return {
+            ...filteredProduct,
+            history: history.length > 0 ? history.map((h: any) => ({
+              id: h.id,
+              action: h.action,
+              changed_by: h.changed_by,
+              change_timestamp: h.change_timestamp,
+              previous_data: h.previous_data,
+              new_data: h.new_data,
+              change_description: h.change_description
+            })) : undefined
+          };
         } catch (error) {
           console.warn(`Could not retrieve product ${productId}:`, error);
           return null;
@@ -546,36 +407,21 @@ export class SafeoutSDK {
   /* ----------------------------------------------------------------------- */
 
   /**
-   * Check authenticity on blockchain with optional data verification
-   * @param productId - Product ID to verify
-   * @param productData - Optional product data to verify hash against (for complete verification)
-   * @returns Complete authenticity verification result
-   */
-  public async checkAuthenticityOnBlockchain(
-    productId: string,
-    productData?: any
-  ): Promise<AuthenticityResult> {
-    this.ensureInitialized();
-
-    return this.tokenManager!.checkAuthenticityOnBlockchain(productId, productData);
-  }
-
-  /**
-   * Check authenticity of multiple products on blockchain in parallel
-   * @param productIds - Array of product IDs to check
+   * Check authenticity on blockchain (batch only - use array with single element for one product)
+   * @param products - Array of objects with productId and optional productData for verification
    * @returns Map of productId to authenticity result
    */
-  public async checkBatchAuthenticityOnBlockchain(
-    productIds: string[]
+  public async checkAuthenticityOnBlockchain(
+    products: Array<{ productId: string; productData?: any }>
   ): Promise<Map<string, AuthenticityResult>> {
     this.ensureInitialized();
 
     const results = new Map<string, AuthenticityResult>();
 
     // Process all checks in parallel
-    const promises = productIds.map(async (productId) => {
+    const promises = products.map(async ({ productId, productData }) => {
       try {
-        const result = await this.tokenManager!.checkAuthenticityOnBlockchain(productId);
+        const result = await this.tokenManager!.checkAuthenticityOnBlockchain(productId, productData);
         return { productId, result };
       } catch (error) {
         return {

@@ -18,12 +18,12 @@ describe('Simple Blockchain Workflow Test', () => {
   }, 30000);
 
   afterAll(async () => {
-    // Clean up all created products
-    for (const productId of createdProducts) {
+    // Clean up all created products (using batch API)
+    if (createdProducts.length > 0) {
       try {
-        await sdk.deleteDppProducts(productId, "simple-workflow-cleanup");
+        await sdk.deleteDppProducts(createdProducts, "simple-workflow-cleanup");
       } catch (error) {
-        console.warn(`Cleanup warning for ${productId}:`, error.message);
+        console.warn('Cleanup warning:', error.message);
       }
     }
   });
@@ -53,12 +53,16 @@ describe('Simple Blockchain Workflow Test', () => {
 
     console.log('🚀 Creating product with ID:', productId);
 
-    // 2. CREATE PRODUCT
-    const creationResult = await sdk.createDppProducts(productData, "simple-workflow-test");
+    // 2. CREATE PRODUCT (using batch API with single product)
+    const creationResults = await sdk.createDppProducts([productData], "simple-workflow-test");
     createdProducts.push(productId); // Track for cleanup
 
     // Verify creation was successful
-    expect(creationResult).toBeDefined();
+    expect(creationResults).toBeDefined();
+    expect(Array.isArray(creationResults)).toBe(true);
+    expect(creationResults.length).toBe(1);
+
+    const creationResult = creationResults[0];
     expect(creationResult.id).toBe(productId);
     expect(creationResult.signature).toBeDefined();
     expect(creationResult.hash).toBeDefined();
@@ -75,20 +79,25 @@ describe('Simple Blockchain Workflow Test', () => {
 
     console.log('🔍 Checking simple existence on blockchain (no data verification)...');
 
-    // 3. SIMPLE BLOCKCHAIN EXISTENCE CHECK (no original data)
-    const existenceResult = await sdk.checkAuthenticityOnBlockchain(productId);
+    // 3. SIMPLE BLOCKCHAIN EXISTENCE CHECK (no original data, using batch API)
+    const existenceResults = await sdk.checkAuthenticityOnBlockchain([{ productId }]);
 
     // 4. ASSERTIONS
+    expect(existenceResults).toBeDefined();
+    expect(existenceResults instanceof Map).toBe(true);
+    expect(existenceResults.size).toBe(1);
+
+    const existenceResult = existenceResults.get(productId);
     expect(existenceResult).toBeDefined();
-    expect(existenceResult.isOnBlockchain).toBe(true);
-    expect(existenceResult.signature).toBeDefined();
-    expect(existenceResult.signature).toBe(creationResult.signature);
+    expect(existenceResult?.isOnBlockchain).toBe(true);
+    expect(existenceResult?.signature).toBeDefined();
+    expect(existenceResult?.signature).toBe(creationResult.signature);
 
     console.log('✅ Simple existence check passed!', {
-      isOnBlockchain: existenceResult.isOnBlockchain,
-      isValid: existenceResult.isValid,
-      reason: existenceResult.reason,
-      signatureMatches: existenceResult.signature === creationResult.signature
+      isOnBlockchain: existenceResult?.isOnBlockchain,
+      isValid: existenceResult?.isValid,
+      reason: existenceResult?.reason,
+      signatureMatches: existenceResult?.signature === creationResult.signature
     });
 
     console.log('🎉 SIMPLE WORKFLOW TEST COMPLETED SUCCESSFULLY!');

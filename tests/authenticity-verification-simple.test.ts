@@ -15,23 +15,28 @@ describe('Authenticity Verification Simple Tests', () => {
 
   test('should return false for non-existent product', async () => {
     const fakeProductId = uuidv4();
-    const result = await sdk.checkAuthenticityOnBlockchain(fakeProductId);
+    const results = await sdk.checkAuthenticityOnBlockchain([{ productId: fakeProductId }]);
 
+    expect(results).toBeDefined();
+    expect(results instanceof Map).toBe(true);
+    expect(results.size).toBe(1);
+
+    const result = results.get(fakeProductId);
     expect(result).toBeDefined();
-    expect(result.isOnBlockchain).toBe(false);
-    expect(result.isValid).toBe(false);
-    expect(result.reason).toContain("not found");
+    expect(result?.isOnBlockchain).toBe(false);
+    expect(result?.isValid).toBe(false);
+    expect(result?.reason).toContain("not found");
 
     console.log('Non-existent product result:', {
-      isOnBlockchain: result.isOnBlockchain,
-      isValid: result.isValid,
-      reason: result.reason
+      isOnBlockchain: result?.isOnBlockchain,
+      isValid: result?.isValid,
+      reason: result?.reason
     });
   }, 10000);
 
   test('should handle batch verification of non-existent products', async () => {
     const fakeIds = [uuidv4(), uuidv4(), uuidv4()];
-    const results = await sdk.checkBatchAuthenticityOnBlockchain(fakeIds);
+    const results = await sdk.checkAuthenticityOnBlockchain(fakeIds.map(id => ({ productId: id })));
 
     expect(results).toBeInstanceOf(Map);
     expect(results.size).toBe(3);
