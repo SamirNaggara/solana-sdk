@@ -12,6 +12,27 @@ The `solana-dpp` SDK enables minting SPL tokens with embedded hashed metadata vi
 - 🔒 **Access Control** - Three-tier visibility (public, owner, private)
 - ⚡ **Auto-setup** - Database and blockchain initialization
 - 🛡️ **Type Safety** - Full TypeScript support with Zod validation
+- 📦 **Batch-First API** - All operations use batch functions for consistency and performance
+
+## API Design Philosophy
+
+**All SDK functions use batch-only operations.** This design provides:
+
+- ✅ **Consistency** - Single API pattern for all operations
+- ✅ **Performance** - Parallel processing of multiple items
+- ✅ **Simplicity** - No dual single/batch function maintenance
+- ✅ **Scalability** - Built for handling multiple operations efficiently
+
+**For single operations:** Use arrays with one element.
+```typescript
+// Single product creation
+const products = await sdk.createDppProducts([productData]);
+const product = products[0];
+
+// Single product verification
+const results = await sdk.checkAuthenticityOnBlockchain([{ productId: "abc-123" }]);
+const result = results.get("abc-123");
+```
 
 ## Quick Start
 
@@ -33,13 +54,15 @@ await sdk.init({
   // All other options are optional with sensible defaults
 });
 
-// Create a digital product passport
-const product = await sdk.createDppProducts({
+// Create a digital product passport (using batch API)
+const products = await sdk.createDppProducts([{
   productUid: "unique-product-id",
   info: {
     // ... product data with DPP fields
   }
-});
+}]);
+
+const product = products[0]; // Get the first (and only) product
 ```
 
 ### Configuration Options
@@ -65,13 +88,15 @@ Initializes the SDK with configuration. Must be called before using other method
 
 ### Product Management
 
-#### `createDppProducts(productData: ProductInput, changedBy?: string): Promise<CompleteProduct>`
+**All functions use batch-only API - use arrays with single elements for individual operations.**
+
 #### `createDppProducts(productsData: ProductInput[], changedBy?: string): Promise<CompleteProduct[]>`
-Creates one or multiple digital product passports with blockchain tokens.
+Creates digital product passports with blockchain tokens.
 
 **Example:**
 ```typescript
-const product = await sdk.createDppProducts({
+// Single product
+const products = await sdk.createDppProducts([{
   productUid: "abc-123",
   info: {
     productName: { value: "EcoLaptop", accessibilityLevel: "public" },
@@ -81,20 +106,64 @@ const product = await sdk.createDppProducts({
     }
     // ...
   }
-}, "john-doe");
+}], "john-doe");
+
+const product = products[0]; // Get the created product
+
+// Multiple products
+const multipleProducts = await sdk.createDppProducts([
+  { productUid: "abc-123", info: { /* ... */ } },
+  { productUid: "def-456", info: { /* ... */ } },
+  { productUid: "ghi-789", info: { /* ... */ } }
+], "john-doe");
 ```
 
-#### `updateDppProducts(productId: string, updateData: Partial<ProductInput>, changedBy?: string): Promise<CompleteProduct>`
-#### `updateDppProducts(productIds: string[], updateData: Partial<ProductInput>, changedBy?: string): Promise<CompleteProduct[]>`
+#### `updateDppProducts(updates: Array<{ productId: string; updateData: Partial<ProductInput> }>, changedBy?: string): Promise<CompleteProduct[]>`
 Updates existing products and their blockchain tokens.
 
-#### `deleteDppProducts(productId: string, changedBy?: string): Promise<void>`
+**Example:**
+```typescript
+// Single product update
+const updatedProducts = await sdk.updateDppProducts([{
+  productId: "abc-123",
+  updateData: {
+    info: {
+      productName: { value: "Updated EcoLaptop", accessibilityLevel: "public" }
+    }
+  }
+}], "john-doe");
+
+// Multiple products update
+const multipleUpdates = await sdk.updateDppProducts([
+  { productId: "abc-123", updateData: { /* ... */ } },
+  { productId: "def-456", updateData: { /* ... */ } }
+], "john-doe");
+```
+
 #### `deleteDppProducts(productIds: string[], changedBy?: string): Promise<void>`
 Deletes products from database and blockchain.
 
-#### `getDppProducts(productId: string, userAccessLevel?: 'public'|'owner'|'private'): Promise<CompleteProduct>`
+**Example:**
+```typescript
+// Single product deletion
+await sdk.deleteDppProducts(["abc-123"], "john-doe");
+
+// Multiple products deletion
+await sdk.deleteDppProducts(["abc-123", "def-456", "ghi-789"], "john-doe");
+```
+
 #### `getDppProducts(productIds: string[], userAccessLevel?: 'public'|'owner'|'private'): Promise<CompleteProduct[]>`
 Retrieves products with access-level filtering.
+
+**Example:**
+```typescript
+// Single product retrieval
+const products = await sdk.getDppProducts(["abc-123"], "public");
+const product = products[0];
+
+// Multiple products retrieval
+const multipleProducts = await sdk.getDppProducts(["abc-123", "def-456"], "owner");
+```
 
 ### Validation
 
@@ -159,23 +228,24 @@ console.log(hashes.brandHash);   // Hash of: above + hazardousSubstances
 // 1. Calculate expected hash client-side
 const expectedHashes = sdk.calculateProductHash(productData);
 
-// 2. Check against blockchain
-const result = await sdk.checkAuthenticityOnBlockchain("abc-123");
+// 2. Check against blockchain (using batch API)
+const results = await sdk.checkAuthenticityOnBlockchain([{ productId: "abc-123" }]);
+const result = results.get("abc-123");
 
 // 3. Perfect match verification
-if (result.hashes?.publicHash === expectedHashes.publicHash) {
+if (result?.hashes?.publicHash === expectedHashes.publicHash) {
   console.log("✅ Hash verification successful - data is authentic!");
 }
 ```
 
-#### `checkAuthenticityOnBlockchain(productId: string, productData?: ProductInput): Promise<AuthenticityResult>`
+#### `checkAuthenticityOnBlockchain(products: Array<{ productId: string; productData?: any }>): Promise<Map<string, AuthenticityResult>>`
 Verifies product authenticity against blockchain records with complete cryptographic proof.
 
 **Two modes of operation:**
 - **Simple mode** (no productData): Only checks if product exists on blockchain
 - **Complete mode** (with productData): Verifies hashes match between provided data and blockchain records
 
-**Returns:**
+**Returns a Map of productId to AuthenticityResult:**
 ```typescript
 {
   isOnBlockchain: boolean;         // Product exists on blockchain (signature found)
@@ -200,12 +270,27 @@ Verifies product authenticity against blockchain records with complete cryptogra
 - **On blockchain, invalid**: `{ isOnBlockchain: true, isValid: false, reason: "Hash mismatch" }`
 - **On blockchain, valid**: `{ isOnBlockchain: true, isValid: true, reason: "All hashes verified" }`
 
-#### `checkBatchAuthenticityOnBlockchain(productIds: string[]): Promise<Map<string, AuthenticityResult>>`
-Verifies authenticity of multiple products in parallel with complete proof data.
-
-**Example:**
+**Examples:**
 ```typescript
-const results = await sdk.checkBatchAuthenticityOnBlockchain(['id1', 'id2', 'id3']);
+// Single product verification (simple mode)
+const results = await sdk.checkAuthenticityOnBlockchain([
+  { productId: "abc-123" }
+]);
+const result = results.get("abc-123");
+console.log(`Product ${result?.isValid ? 'VALID' : 'INVALID'}`);
+
+// Single product verification (complete mode with data verification)
+const results = await sdk.checkAuthenticityOnBlockchain([
+  { productId: "abc-123", productData: originalProductData }
+]);
+
+// Multiple products verification
+const results = await sdk.checkAuthenticityOnBlockchain([
+  { productId: "abc-123" },
+  { productId: "def-456", productData: someProductData },
+  { productId: "ghi-789" }
+]);
+
 results.forEach((result, productId) => {
   console.log(`${productId}: ${result.isValid ? 'VALID' : 'INVALID'}`);
   if (result.signature) {
