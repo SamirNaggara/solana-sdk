@@ -212,6 +212,7 @@ export class TokenManager {
       // Check if all hashes match
       if (memoData.public !== hashes.publicHash) {
         return {
+          isOnBlockchain: true,
           isValid: false,
           reason: "Public hash mismatch",
           signature,
@@ -228,6 +229,7 @@ export class TokenManager {
 
       if (memoData.owner !== hashes.ownerHash) {
         return {
+          isOnBlockchain: true,
           isValid: false,
           reason: "Owner hash mismatch",
           signature,
@@ -244,6 +246,7 @@ export class TokenManager {
 
       if (memoData.brand !== hashes.brandHash) {
         return {
+          isOnBlockchain: true,
           isValid: false,
           reason: "Brand hash mismatch",
           signature,
@@ -260,6 +263,7 @@ export class TokenManager {
 
       // All checks passed - return complete proof
       return {
+        isOnBlockchain: true,
         isValid: true,
         reason: "All hashes verified successfully",
         signature,
@@ -274,6 +278,7 @@ export class TokenManager {
       };
     } catch (error) {
       return {
+        isOnBlockchain: false,
         isValid: false,
         reason: `Error during authenticity check: ${error instanceof Error ? error.message : String(error)}`
       };

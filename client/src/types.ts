@@ -13,7 +13,8 @@ export const SignatureSchema = z.object({
 
 /** Enhanced authenticity check result with complete blockchain proof */
 export type AuthenticityResult = {
-  isValid: boolean;
+  isOnBlockchain: boolean;  // Product exists on blockchain (signature found)
+  isValid: boolean;         // Hash match (if on blockchain)
   reason?: string;
   signature?: string;
   hashes?: {

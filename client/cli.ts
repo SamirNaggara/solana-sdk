@@ -349,7 +349,15 @@ async function mainLoop() {
 
           console.log("\n🔍 Authenticity Check Result:");
           console.log("━".repeat(50));
-          console.log(`Status: ${result.isValid ? "✅ VALID" : "❌ INVALID"}`);
+
+          // Blockchain status
+          console.log(`Blockchain: ${result.isOnBlockchain ? "✅ ON BLOCKCHAIN" : "❌ NOT ON BLOCKCHAIN"}`);
+
+          // Validity status (only relevant if on blockchain)
+          if (result.isOnBlockchain) {
+            console.log(`Validity: ${result.isValid ? "✅ VALID (Hash Match)" : "❌ INVALID (Hash Mismatch)"}`);
+          }
+
           console.log(`Reason: ${result.reason || "No reason provided"}`);
 
           if (result.signature) {
@@ -387,9 +395,15 @@ async function mainLoop() {
           console.log("━".repeat(50));
 
           results.forEach((result, productId) => {
-            const status = result.isValid ? "✅ VALID" : "❌ INVALID";
+            const blockchainStatus = result.isOnBlockchain ? "✅ ON BLOCKCHAIN" : "❌ NOT ON BLOCKCHAIN";
+            const validityStatus = result.isOnBlockchain ?
+              (result.isValid ? "✅ VALID" : "❌ INVALID") : "N/A";
+
             console.log(`\n📍 ${productId}:`);
-            console.log(`   Status: ${status}`);
+            console.log(`   Blockchain: ${blockchainStatus}`);
+            if (result.isOnBlockchain) {
+              console.log(`   Validity: ${validityStatus}`);
+            }
             if (result.reason) {
               console.log(`   Reason: ${result.reason}`);
             }
@@ -401,9 +415,10 @@ async function mainLoop() {
             }
           });
 
-          const validCount = Array.from(results.values()).filter(r => r.isValid).length;
+          const onBlockchainCount = Array.from(results.values()).filter(r => r.isOnBlockchain).length;
+          const validCount = Array.from(results.values()).filter(r => r.isOnBlockchain && r.isValid).length;
           console.log("━".repeat(50));
-          console.log(`Summary: ${validCount}/${productIds.length} products are valid`);
+          console.log(`Summary: ${onBlockchainCount}/${productIds.length} products on blockchain, ${validCount}/${onBlockchainCount} valid`);
           break;
         }
         case "batch-create": {

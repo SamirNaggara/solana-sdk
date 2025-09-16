@@ -174,7 +174,8 @@ Verifies product authenticity against blockchain records with complete cryptogra
 **Returns:**
 ```typescript
 {
-  isValid: boolean;
+  isOnBlockchain: boolean;         // Product exists on blockchain (signature found)
+  isValid: boolean;                // Hash match (if on blockchain)
   reason?: string;
   signature?: string;              // Blockchain transaction signature
   hashes?: {
@@ -189,6 +190,11 @@ Verifies product authenticity against blockchain records with complete cryptogra
   };
 }
 ```
+
+**Result Scenarios:**
+- **Not on blockchain**: `{ isOnBlockchain: false, isValid: false, reason: "Product not found on blockchain" }`
+- **On blockchain, invalid**: `{ isOnBlockchain: true, isValid: false, reason: "Hash mismatch" }`
+- **On blockchain, valid**: `{ isOnBlockchain: true, isValid: true, reason: "All hashes verified" }`
 
 #### `checkBatchAuthenticityOnBlockchain(productIds: string[]): Promise<Map<string, AuthenticityResult>>`
 Verifies authenticity of multiple products in parallel with complete proof data.
