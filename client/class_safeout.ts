@@ -4,6 +4,7 @@ import {
   PublicKey,
   Keypair,
 } from "@solana/web3.js";
+import { createHash } from "crypto";
 
 // Internal imports
 import { DatabaseManager } from "./src/database-manager";
@@ -138,6 +139,50 @@ export class SafeoutSDK {
     } catch (error) {
       throw new Error(`DPP validation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Calculate product hash for verification purposes
+   * Uses the same algorithm as blockchain verification
+   * @param productData - The product data to hash
+   * @returns Object containing public, owner, and brand hashes
+   */
+  public calculateProductHash(productData: ProductInput): {
+    publicHash: string;
+    ownerHash: string;
+    brandHash: string;
+  } {
+    const hashAlgo = "sha256";
+
+    // Helper function to hash an object
+    const hashObject = (obj: any): string => {
+      return createHash(hashAlgo).update(JSON.stringify(obj)).digest("hex");
+    };
+
+    // Convert ProductInput to the same format used in getVisibilityHashes
+    const completeProduct = this.convertProductInputToCompleteFormat(productData);
+
+    // Filter data by access levels (same logic as getVisibilityHashes)
+    const publicData = ValidationUtils.filterProductByAccess(completeProduct, 'public');
+    const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
+    const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
+
+    return {
+      publicHash: hashObject(publicData),
+      ownerHash: hashObject(ownerData),
+      brandHash: hashObject(brandData)
+    };
+  }
+
+  /**
+   * Convert ProductInput to the same format used internally
+   * @private
+   */
+  private convertProductInputToCompleteFormat(productData: ProductInput): any {
+    return {
+      ...productData.info,
+      id: productData.productUid
+    };
   }
 
   /**
