@@ -1,7 +1,7 @@
 import { Client, Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, readdirSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
 import { ProductInput, CompleteProduct } from './types';
 
 export class DatabaseManager {
@@ -70,11 +70,37 @@ export class DatabaseManager {
   }
 
   /**
+   * Find the migrations directory - works both in development and when installed as npm package
+   */
+  private findMigrationsDirectory(): string {
+    // Try different possible paths
+    const possiblePaths = [
+      // Development: from dist/client/src to migrations/
+      join(__dirname, '..', '..', 'migrations'),
+      // NPM package: from node_modules/solana-dpp/dist/client/src to node_modules/solana-dpp/migrations/
+      join(__dirname, '..', '..', '..', 'migrations'),
+      // Alternative NPM path
+      resolve(__dirname, '../../../migrations'),
+      // Fallback: look for migrations directory relative to package root
+      join(__dirname, '..', '..', '..', '..', 'node_modules', 'solana-dpp', 'migrations')
+    ];
+
+    for (const path of possiblePaths) {
+      if (existsSync(path)) {
+        return path;
+      }
+    }
+
+    throw new Error('Migrations directory not found. Searched paths: ' + possiblePaths.join(', '));
+  }
+
+  /**
    * Create the database schema by reading the SQL migration file
    */
   private async createSchemaFromFile(client: any): Promise<void> {
     try {
-      const migrationPath = join(__dirname, '..', '..', 'migrations', '001_initial_schema.sql');
+      const migrationsDir = this.findMigrationsDirectory();
+      const migrationPath = join(migrationsDir, '001_initial_schema.sql');
       const schemaSql = readFileSync(migrationPath, 'utf-8');
       await client.query(schemaSql);
     } catch (error) {
@@ -501,15 +527,16 @@ export class DatabaseManager {
       const appliedMigrations = new Set(appliedResult.rows.map((row: any) => row.version));
 
       // Get migration files
-      const migrationsDir = join(__dirname, '..', '..', 'migrations');
       let migrationFiles: string[] = [];
 
       try {
+        const migrationsDir = this.findMigrationsDirectory();
         migrationFiles = readdirSync(migrationsDir)
           .filter(file => file.endsWith('.sql'))
           .sort(); // Ensure they run in order
       } catch (error) {
         console.log('📁 No migrations directory found, skipping migrations');
+        console.log('Search error:', error instanceof Error ? error.message : String(error));
         return;
       }
 
@@ -526,6 +553,7 @@ export class DatabaseManager {
         console.log(`📝 Running migration: ${migrationFile}`);
 
         try {
+          const migrationsDir = this.findMigrationsDirectory();
           const migrationPath = join(migrationsDir, migrationFile);
           const migrationSql = readFileSync(migrationPath, 'utf-8');
 
