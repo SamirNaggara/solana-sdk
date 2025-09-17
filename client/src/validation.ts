@@ -1,6 +1,6 @@
 import z from "zod";
 import DppProductSchema from "../SchemaZod";
-import { DPPField } from "./types";
+import { DPPField, FieldDifference } from "./types";
 
 export class ValidationUtils {
   /**
@@ -88,5 +88,154 @@ export class ValidationUtils {
     }
 
     return filtered;
+  }
+
+  /**
+   * Compare two product objects and return detailed differences
+   * @param storedProduct - Product object from database
+   * @param providedProduct - Product object provided for verification
+   * @returns Array of field differences
+   */
+  static compareProductObjects(storedProduct: any, providedProduct: any): FieldDifference[] {
+    const differences: FieldDifference[] = [];
+
+    this.compareObjectsRecursive(storedProduct, providedProduct, '', differences);
+
+    return differences;
+  }
+
+  /**
+   * Recursively compare two objects and populate differences array
+   */
+  private static compareObjectsRecursive(
+    stored: any,
+    provided: any,
+    path: string,
+    differences: FieldDifference[]
+  ): void {
+    // Handle null/undefined cases
+    if (stored === null || stored === undefined) {
+      if (provided !== null && provided !== undefined) {
+        differences.push({
+          path,
+          storedValue: stored,
+          providedValue: provided,
+          changeType: 'added'
+        });
+      }
+      return;
+    }
+
+    if (provided === null || provided === undefined) {
+      differences.push({
+        path,
+        storedValue: stored,
+        providedValue: provided,
+        changeType: 'removed'
+      });
+      return;
+    }
+
+    // Handle DPP fields (objects with value and accessibilityLevel)
+    if (this.isDPPField(stored) && this.isDPPField(provided)) {
+      const storedDPP = stored as DPPField;
+      const providedDPP = provided as DPPField;
+
+      if (storedDPP.value !== providedDPP.value) {
+        differences.push({
+          path: `${path}.value`,
+          storedValue: storedDPP.value,
+          providedValue: providedDPP.value,
+          changeType: 'modified'
+        });
+      }
+
+      if (storedDPP.accessibilityLevel !== providedDPP.accessibilityLevel) {
+        differences.push({
+          path: `${path}.accessibilityLevel`,
+          storedValue: storedDPP.accessibilityLevel,
+          providedValue: providedDPP.accessibilityLevel,
+          changeType: 'modified'
+        });
+      }
+      return;
+    }
+
+    // Handle arrays
+    if (Array.isArray(stored) && Array.isArray(provided)) {
+      const maxLength = Math.max(stored.length, provided.length);
+
+      for (let i = 0; i < maxLength; i++) {
+        const arrayPath = `${path}[${i}]`;
+
+        if (i >= stored.length) {
+          differences.push({
+            path: arrayPath,
+            storedValue: undefined,
+            providedValue: provided[i],
+            changeType: 'added'
+          });
+        } else if (i >= provided.length) {
+          differences.push({
+            path: arrayPath,
+            storedValue: stored[i],
+            providedValue: undefined,
+            changeType: 'removed'
+          });
+        } else {
+          this.compareObjectsRecursive(stored[i], provided[i], arrayPath, differences);
+        }
+      }
+      return;
+    }
+
+    // Handle objects
+    if (typeof stored === 'object' && typeof provided === 'object') {
+      const allKeys = new Set([...Object.keys(stored), ...Object.keys(provided)]);
+
+      for (const key of allKeys) {
+        const nestedPath = path ? `${path}.${key}` : key;
+
+        if (!(key in stored)) {
+          differences.push({
+            path: nestedPath,
+            storedValue: undefined,
+            providedValue: provided[key],
+            changeType: 'added'
+          });
+        } else if (!(key in provided)) {
+          differences.push({
+            path: nestedPath,
+            storedValue: stored[key],
+            providedValue: undefined,
+            changeType: 'removed'
+          });
+        } else {
+          this.compareObjectsRecursive(stored[key], provided[key], nestedPath, differences);
+        }
+      }
+      return;
+    }
+
+    // Handle primitive values
+    if (stored !== provided) {
+      differences.push({
+        path,
+        storedValue: stored,
+        providedValue: provided,
+        changeType: 'modified'
+      });
+    }
+  }
+
+  /**
+   * Check if an object is a DPP field
+   */
+  private static isDPPField(obj: any): boolean {
+    return obj &&
+           typeof obj === 'object' &&
+           'value' in obj &&
+           'accessibilityLevel' in obj &&
+           ['public', 'owner', 'private'].includes(obj.accessibilityLevel);
   }
 }

@@ -14,6 +14,7 @@ The `solana-dpp` SDK enables minting SPL tokens with embedded hashed metadata vi
 - 🛡️ **Type Safety** - Full TypeScript support with Zod validation
 - 📦 **Batch-First API** - All operations use batch functions for consistency and performance
 - 🔄 **Consistent Hash Verification** - Fixed hash calculation consistency between creation and verification
+- 🔍 **Detailed Diagnostics** - Precise field-level difference detection when data is modified
 
 ## API Design Philosophy
 
@@ -263,13 +264,19 @@ Verifies product authenticity against blockchain records with complete cryptogra
     transaction?: string;          // Transaction ID
     slot?: number;                 // Block slot number
   };
+  fieldDifferences?: Array<{       // Detailed differences when data is modified
+    path: string;                  // Field path (e.g., "productName.value", "manufacturer.name.value")
+    storedValue: any;              // Value stored in database
+    providedValue: any;            // Value provided for verification
+    changeType: 'modified' | 'added' | 'removed';
+  }>;
 }
 ```
 
 **Result Scenarios:**
 - **Not on blockchain**: `{ isOnBlockchain: false, isValid: false, reason: "Product not found on blockchain" }`
-- **On blockchain, invalid**: `{ isOnBlockchain: true, isValid: false, reason: "Hash mismatch" }`
-- **On blockchain, valid**: `{ isOnBlockchain: true, isValid: true, reason: "All hashes verified" }`
+- **On blockchain, invalid**: `{ isOnBlockchain: true, isValid: false, reason: "Hash mismatch", fieldDifferences: [...] }`
+- **On blockchain, valid**: `{ isOnBlockchain: true, isValid: true, reason: "All hashes verified successfully" }`
 
 **Examples:**
 ```typescript
@@ -299,6 +306,12 @@ results.forEach((result, productId) => {
   }
   if (result.hashes) {
     console.log(`Hash verification completed`);
+  }
+  if (result.fieldDifferences && result.fieldDifferences.length > 0) {
+    console.log(`Found ${result.fieldDifferences.length} field differences:`);
+    result.fieldDifferences.forEach(diff => {
+      console.log(`  - ${diff.path}: "${diff.storedValue}" → "${diff.providedValue}" (${diff.changeType})`);
+    });
   }
 });
 ```

@@ -27,6 +27,14 @@ export type AuthenticityResult = {
     transaction?: string;
     slot?: number;
   };
+  fieldDifferences?: FieldDifference[];
+};
+
+export type FieldDifference = {
+  path: string;           // e.g., "productName", "manufacturer.name", "materialComposition[0].material"
+  storedValue: any;       // Value from database
+  providedValue: any;     // Value from provided data
+  changeType: 'modified' | 'added' | 'removed';
 };
 
 // Digital Product Passport (DPP) Types

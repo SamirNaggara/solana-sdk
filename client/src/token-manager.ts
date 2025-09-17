@@ -252,6 +252,11 @@ export class TokenManager {
 
         // Compare calculated hashes with blockchain hashes
         if (memoData.public !== calculatedHashes.publicHash) {
+          // Get detailed differences by comparing with stored data
+          const storedProductData = await this.getCompleteProductData(productId);
+          const fieldDifferences = storedProductData ?
+            ValidationUtils.compareProductObjects(storedProductData, completeProduct) : [];
+
           return {
             isOnBlockchain: true,
             isValid: false,
@@ -260,11 +265,17 @@ export class TokenManager {
             hashes: calculatedHashes,
             blockchainData: {
               memo: memoData
-            }
+            },
+            fieldDifferences
           };
         }
 
         if (memoData.owner !== calculatedHashes.ownerHash) {
+          // Get detailed differences by comparing with stored data
+          const storedProductData = await this.getCompleteProductData(productId);
+          const fieldDifferences = storedProductData ?
+            ValidationUtils.compareProductObjects(storedProductData, completeProduct) : [];
+
           return {
             isOnBlockchain: true,
             isValid: false,
@@ -273,11 +284,17 @@ export class TokenManager {
             hashes: calculatedHashes,
             blockchainData: {
               memo: memoData
-            }
+            },
+            fieldDifferences
           };
         }
 
         if (memoData.brand !== calculatedHashes.brandHash) {
+          // Get detailed differences by comparing with stored data
+          const storedProductData = await this.getCompleteProductData(productId);
+          const fieldDifferences = storedProductData ?
+            ValidationUtils.compareProductObjects(storedProductData, completeProduct) : [];
+
           return {
             isOnBlockchain: true,
             isValid: false,
@@ -286,7 +303,8 @@ export class TokenManager {
             hashes: calculatedHashes,
             blockchainData: {
               memo: memoData
-            }
+            },
+            fieldDifferences
           };
         }
 
@@ -457,7 +475,7 @@ export class TokenManager {
 
     try {
       // Get the complete product data in DPP format (same as stored)
-      const productData = await this.getCompleteProductData(client, productId);
+      const productData = await this.getCompleteProductDataWithClient(client, productId);
 
       if (!productData) {
         throw new Error(`Product with ID ${productId} not found.`);
@@ -489,9 +507,21 @@ export class TokenManager {
   }
 
   /**
+   * Get complete product data in DPP format with all relations (wrapper using pool)
+   */
+  private async getCompleteProductData(productId: string): Promise<any> {
+    const client = await this.pool.connect();
+    try {
+      return await this.getCompleteProductDataWithClient(client, productId);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Get complete product data in DPP format with all relations
    */
-  private async getCompleteProductData(client: any, productId: string): Promise<any> {
+  private async getCompleteProductDataWithClient(client: any, productId: string): Promise<any> {
     // Get product data with manufacturer and all accessibilityLevel fields
     const productResult = await client.query(
       `SELECT p.*, m.name as manufacturer_name, m.address as manufacturer_address,
