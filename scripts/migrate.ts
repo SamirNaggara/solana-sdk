@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { SafeoutSDK } from '../client/class_safeout';
 import * as dotenv from 'dotenv';
 

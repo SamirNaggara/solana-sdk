@@ -498,7 +498,20 @@ await sdk.init({
 
 ### Manual Migration Commands
 
-You can also run migrations manually:
+For users who installed the package from NPM, use the global CLI command:
+
+```bash
+# Install globally for CLI access (optional)
+npm install -g solana-dpp
+
+# Run migrations using the global CLI
+solana-dpp-migrate
+
+# Or run directly with npx (no global install needed)
+npx solana-dpp-migrate
+```
+
+For development within this repository:
 
 ```bash
 # Run all pending migrations
