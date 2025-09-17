@@ -243,14 +243,6 @@ export class TokenManager {
           brandHash: this.hashObject(JSON.stringify(brandData))
         };
 
-        console.log('🔍 VERIFICATION HASH DEBUG:');
-        console.log('Product ID:', productId);
-        console.log('Client Public Hash:', clientHashes.publicHash);
-        console.log('Blockchain Public Hash:', memoData.public);
-        console.log('Client Owner Hash:', clientHashes.ownerHash);
-        console.log('Blockchain Owner Hash:', memoData.owner);
-        console.log('Client Brand Hash:', clientHashes.brandHash);
-        console.log('Blockchain Brand Hash:', memoData.brand);
 
         const calculatedHashes = clientHashes;
 
@@ -464,11 +456,13 @@ export class TokenManager {
       const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
       const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
 
+
       const hashes = {
         publicHash: this.hashObject(JSON.stringify(publicData)),
         ownerHash: this.hashObject(JSON.stringify(ownerData)),
         brandHash: this.hashObject(JSON.stringify(brandData))
       };
+
 
 
       return hashes;
@@ -481,10 +475,13 @@ export class TokenManager {
    * Get complete product data in DPP format with all relations
    */
   private async getCompleteProductData(client: any, productId: string): Promise<any> {
-    // Get product data with manufacturer
+    // Get product data with manufacturer and all accessibilityLevel fields
     const productResult = await client.query(
       `SELECT p.*, m.name as manufacturer_name, m.address as manufacturer_address,
-              m.contact_email as manufacturer_contact_email
+              m.contact_email as manufacturer_contact_email,
+              m.name_access_level as manufacturer_name_access_level,
+              m.address_access_level as manufacturer_address_access_level,
+              m.contact_email_access_level as manufacturer_contact_email_access_level
        FROM dpp_products p
        JOIN manufacturers m ON p.manufacturer_id = m.id
        WHERE p."productId" = $1`,
@@ -497,43 +494,42 @@ export class TokenManager {
 
     const product = productResult.rows[0];
 
-    // Get material compositions
+    // Get material compositions with accessibilityLevel
     const materialResult = await client.query(
-      'SELECT material, percentage FROM material_compositions WHERE product_id = $1',
+      'SELECT material, percentage, material_access_level, percentage_access_level FROM material_compositions WHERE product_id = $1',
       [productId]
     );
 
-    // Get hazardous substances
+    // Get hazardous substances with accessibilityLevel
     const hazardousResult = await client.query(
-      'SELECT substance, cas_number as "casNumber", concentration FROM hazardous_substances WHERE product_id = $1',
+      'SELECT substance, cas_number as "casNumber", concentration, substance_access_level, cas_number_access_level, concentration_access_level FROM hazardous_substances WHERE product_id = $1',
       [productId]
     );
 
-    // Return product data in the same DPP format as stored/created
-    // Note: The actual DPP data should be stored as JSON with accessibilityLevel
-    // This is a simplified version - in reality we should reconstruct the full DPP structure
+    // Return product data with CORRECT accessibilityLevel from database
     return {
-      productName: { value: product.product_name, accessibilityLevel: 'public' },
-      dateOfManufacture: { value: product.date_of_manufacture, accessibilityLevel: 'public' },
-      placeOfManufacture: { value: product.place_of_manufacture, accessibilityLevel: 'public' },
-      productCategory: { value: product.product_category, accessibilityLevel: 'public' },
-      repairabilityScore: { value: product.repairability_score, accessibilityLevel: 'public' },
-      endOfLifeInstructions: { value: product.end_of_life_instructions, accessibilityLevel: 'public' },
-      digitalLink: { value: product.digital_link, accessibilityLevel: 'public' },
+      productName: { value: product.product_name, accessibilityLevel: product.product_name_access_level },
+      dateOfManufacture: { value: product.date_of_manufacture.toISOString().split('T')[0], accessibilityLevel: product.date_of_manufacture_access_level },
+      placeOfManufacture: { value: product.place_of_manufacture, accessibilityLevel: product.place_of_manufacture_access_level },
+      productCategory: { value: product.product_category, accessibilityLevel: product.product_category_access_level },
+      repairabilityScore: { value: product.repairability_score, accessibilityLevel: product.repairability_score_access_level },
+      endOfLifeInstructions: { value: product.end_of_life_instructions, accessibilityLevel: product.end_of_life_instructions_access_level },
+      digitalLink: { value: product.digital_link, accessibilityLevel: product.digital_link_access_level },
       manufacturer: {
-        name: { value: product.manufacturer_name, accessibilityLevel: 'public' },
-        address: { value: product.manufacturer_address, accessibilityLevel: 'owner' },
-        contactEmail: { value: product.manufacturer_contact_email, accessibilityLevel: 'owner' }
+        name: { value: product.manufacturer_name, accessibilityLevel: product.manufacturer_name_access_level },
+        address: { value: product.manufacturer_address, accessibilityLevel: product.manufacturer_address_access_level },
+        contactEmail: { value: product.manufacturer_contact_email, accessibilityLevel: product.manufacturer_contact_email_access_level }
       },
       materialComposition: materialResult.rows.map((mc: any) => ({
-        material: { value: mc.material, accessibilityLevel: 'public' },
-        percentage: { value: mc.percentage, accessibilityLevel: 'public' }
+        material: { value: mc.material, accessibilityLevel: mc.material_access_level },
+        percentage: { value: mc.percentage, accessibilityLevel: mc.percentage_access_level }
       })),
       hazardousSubstances: hazardousResult.rows.map((hs: any) => ({
-        substance: { value: hs.substance, accessibilityLevel: 'private' },
-        casNumber: { value: hs.casNumber, accessibilityLevel: 'private' },
-        concentration: { value: hs.concentration, accessibilityLevel: 'private' }
-      }))
+        substance: { value: hs.substance, accessibilityLevel: hs.substance_access_level },
+        casNumber: { value: hs.casNumber, accessibilityLevel: hs.cas_number_access_level },
+        concentration: { value: hs.concentration, accessibilityLevel: hs.concentration_access_level }
+      })),
+      id: productId
     };
   }
 

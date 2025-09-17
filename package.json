@@ -1,6 +1,6 @@
 {
   "name": "solana-dpp",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "TypeScript SDK for creating and managing Digital Product Passports (DPP) on Solana blockchain with secure metadata storage",
   "main": "dist/client/class_safeout.js",
   "types": "dist/client/class_safeout.d.ts",

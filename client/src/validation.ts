@@ -74,7 +74,7 @@ export class ValidationUtils {
         // Handle arrays
         filtered[key] = value.map(item =>
           this.filterProductByAccess(item, userAccessLevel)
-        ).filter(item => item !== null);
+        ).filter(item => item !== null && typeof item === 'object' ? Object.keys(item).length > 0 : true);
       } else if (value && typeof value === 'object') {
         // Handle nested objects
         const nestedFiltered = this.filterProductByAccess(value, userAccessLevel);

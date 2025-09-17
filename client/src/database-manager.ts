@@ -105,6 +105,9 @@ export class DatabaseManager {
     name: string;
     address: string;
     contactEmail: string;
+    nameAccessLevel: string;
+    addressAccessLevel: string;
+    contactEmailAccessLevel: string;
   }): Promise<string> {
     const client = await this.pool.connect();
     
@@ -121,9 +124,10 @@ export class DatabaseManager {
 
       // Create new manufacturer
       const newResult = await client.query(
-        `INSERT INTO manufacturers (name, address, contact_email) 
-         VALUES ($1, $2, $3) RETURNING id`,
-        [manufacturerData.name, manufacturerData.address, manufacturerData.contactEmail]
+        `INSERT INTO manufacturers (name, address, contact_email, name_access_level, address_access_level, contact_email_access_level)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [manufacturerData.name, manufacturerData.address, manufacturerData.contactEmail,
+         manufacturerData.nameAccessLevel, manufacturerData.addressAccessLevel, manufacturerData.contactEmailAccessLevel]
       );
 
       return newResult.rows[0].id;
@@ -146,7 +150,10 @@ export class DatabaseManager {
       const manufacturerId = await this.createOrFindManufacturer({
         name: productData.info.manufacturer.name.value,
         address: productData.info.manufacturer.address.value,
-        contactEmail: productData.info.manufacturer.contactEmail.value
+        contactEmail: productData.info.manufacturer.contactEmail.value,
+        nameAccessLevel: productData.info.manufacturer.name.accessibilityLevel,
+        addressAccessLevel: productData.info.manufacturer.address.accessibilityLevel,
+        contactEmailAccessLevel: productData.info.manufacturer.contactEmail.accessibilityLevel
       });
 
       // Create the main product
@@ -154,8 +161,11 @@ export class DatabaseManager {
         `INSERT INTO dpp_products
          ("productId", product_name, date_of_manufacture, place_of_manufacture,
           product_category, repairability_score, end_of_life_instructions,
-          digital_link, manufacturer_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          digital_link, manufacturer_id, product_name_access_level,
+          date_of_manufacture_access_level, place_of_manufacture_access_level,
+          product_category_access_level, repairability_score_access_level,
+          end_of_life_instructions_access_level, digital_link_access_level)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING *`,
         [
           productData.productUid,
@@ -166,7 +176,14 @@ export class DatabaseManager {
           productData.info.repairabilityScore.value,
           productData.info.endOfLifeInstructions.value,
           productData.info.digitalLink.value,
-          manufacturerId
+          manufacturerId,
+          productData.info.productName.accessibilityLevel,
+          productData.info.dateOfManufacture.accessibilityLevel,
+          productData.info.placeOfManufacture.accessibilityLevel,
+          productData.info.productCategory.accessibilityLevel,
+          productData.info.repairabilityScore.accessibilityLevel,
+          productData.info.endOfLifeInstructions.accessibilityLevel,
+          productData.info.digitalLink.accessibilityLevel
         ]
       );
 
@@ -175,16 +192,16 @@ export class DatabaseManager {
       // Create material compositions
       for (const mc of productData.info.materialComposition) {
         await client.query(
-          'INSERT INTO material_compositions (material, percentage, product_id) VALUES ($1, $2, $3)',
-          [mc.material.value, mc.percentage.value, product.productId]
+          'INSERT INTO material_compositions (material, percentage, product_id, material_access_level, percentage_access_level) VALUES ($1, $2, $3, $4, $5)',
+          [mc.material.value, mc.percentage.value, product.productId, mc.material.accessibilityLevel, mc.percentage.accessibilityLevel]
         );
       }
 
       // Create hazardous substances
       for (const hs of productData.info.hazardousSubstances) {
         await client.query(
-          'INSERT INTO hazardous_substances (substance, cas_number, concentration, product_id) VALUES ($1, $2, $3, $4)',
-          [hs.substance.value, hs.casNumber.value, hs.concentration.value, product.productId]
+          'INSERT INTO hazardous_substances (substance, cas_number, concentration, product_id, substance_access_level, cas_number_access_level, concentration_access_level) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+          [hs.substance.value, hs.casNumber.value, hs.concentration.value, product.productId, hs.substance.accessibilityLevel, hs.casNumber.accessibilityLevel, hs.concentration.accessibilityLevel]
         );
       }
 
