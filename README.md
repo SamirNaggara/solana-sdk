@@ -8,11 +8,12 @@ The `solana-dpp` SDK enables minting SPL tokens with embedded hashed metadata vi
 
 - 🚀 **Ultra-simple API** - Empty constructor, all config in `init()`
 - 🔗 **Blockchain Integration** - Solana SPL tokens with memo instructions
-- 📊 **PostgreSQL Storage** - Automatic schema creation and management
+- 📊 **PostgreSQL Storage** - Automatic schema creation and migration management
 - 🔒 **Access Control** - Three-tier visibility (public, owner, private)
-- ⚡ **Auto-setup** - Database and blockchain initialization
+- ⚡ **Auto-setup** - Database and blockchain initialization with automatic migrations
 - 🛡️ **Type Safety** - Full TypeScript support with Zod validation
 - 📦 **Batch-First API** - All operations use batch functions for consistency and performance
+- 🔄 **Consistent Hash Verification** - Fixed hash calculation consistency between creation and verification
 
 ## API Design Philosophy
 
@@ -477,6 +478,69 @@ docker run -d --name solana-dpp-test-db \
 ```
 
 The test suite includes both unit tests (no external dependencies) and integration tests (with database).
+
+## Database Migrations
+
+The SDK includes an automatic migration system that ensures your database schema is always up to date.
+
+### Automatic Migrations
+
+Migrations run automatically when you initialize the SDK:
+
+```typescript
+const sdk = new SafeoutSDK();
+await sdk.init({
+  databaseUrl: "postgresql://user:password@localhost:5432/database",
+  rpcUrl: "https://api.devnet.solana.com"
+});
+// Migrations run automatically during init()
+```
+
+### Manual Migration Commands
+
+You can also run migrations manually:
+
+```bash
+# Run all pending migrations
+npm run db:migrate
+
+# Or use the setup command (alias for migrate)
+npm run db:setup
+```
+
+### Manual Migration via API
+
+```typescript
+const sdk = new SafeoutSDK();
+await sdk.init({...});
+
+// Run migrations manually
+await sdk.runDatabaseMigrations();
+```
+
+### Migration System Features
+
+- ✅ **Automatic detection** - Runs only pending migrations
+- ✅ **Safe execution** - Each migration runs in a transaction (auto-rollback on error)
+- ✅ **Legacy compatibility** - Automatically migrates from old migration tracking
+- ✅ **Idempotent** - Safe to run multiple times
+- ✅ **Ordered execution** - Migrations run in chronological order (001, 002, 003...)
+
+### Migration History
+
+The system tracks applied migrations in the `schema_migrations` table:
+
+```sql
+-- View applied migrations
+SELECT version, applied_at FROM schema_migrations ORDER BY version;
+```
+
+### Current Migrations
+
+- `001_initial_schema.sql` - Initial database schema
+- `002_add_accessibility_levels.sql` - AccessibilityLevel columns for proper hash calculation
+
+New migrations are automatically detected and applied when you update the SDK version.
 
 ## License
 

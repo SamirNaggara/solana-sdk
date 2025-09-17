@@ -254,6 +254,16 @@ export class SafeoutSDK {
     return this.updateMultipleProducts(updates, changedBy);
   }
 
+  /**
+   * Run database migrations manually
+   * This can be called to ensure database schema is up to date
+   * @returns Promise<void>
+   */
+  public async runDatabaseMigrations(): Promise<void> {
+    this.ensureInitialized();
+    return this.databaseManager!.runMigrations();
+  }
+
 
   private async updateMultipleProducts(
     updates: Array<{ productId: string; updateData: Partial<ProductInput> }>,

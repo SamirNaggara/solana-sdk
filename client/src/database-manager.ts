@@ -1,6 +1,6 @@
 import { Client, Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { ProductInput, CompleteProduct } from './types';
 
@@ -59,6 +59,9 @@ export class DatabaseManager {
       } else {
         console.log('✅ Database schema already exists');
       }
+
+      // Run pending migrations
+      await this.runPendingMigrations(client);
 
       client.release();
     } catch (error) {
@@ -432,12 +435,127 @@ export class DatabaseManager {
    */
   async updateProductSignature(productId: string, signature: string): Promise<void> {
     const client = await this.pool.connect();
-    
+
     try {
       await client.query(
         'UPDATE dpp_products SET signature = $1, updated_at = CURRENT_TIMESTAMP WHERE "productId" = $2',
         [signature, productId]
       );
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Run all pending database migrations
+   * @param client - Database client
+   */
+  private async runPendingMigrations(client: any): Promise<void> {
+    try {
+      // Create migrations table if it doesn't exist
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          version VARCHAR(255) PRIMARY KEY,
+          applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // Check if we need to migrate from old migrations table
+      const oldMigrationsExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'migrations'
+        );
+      `);
+
+      if (oldMigrationsExists.rows[0].exists) {
+        console.log('🔄 Migrating from old migrations table...');
+        await client.query(`
+          INSERT INTO schema_migrations (version, applied_at)
+          SELECT filename, executed_at FROM migrations
+          ON CONFLICT (version) DO NOTHING;
+        `);
+        console.log('✅ Old migrations migrated successfully');
+      }
+
+      // If schema exists but no migrations recorded, mark 001 as applied
+      const schemaExists = await client.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables
+          WHERE table_schema = 'public'
+          AND table_name = 'dpp_products'
+        );
+      `);
+
+      if (schemaExists.rows[0].exists) {
+        await client.query(`
+          INSERT INTO schema_migrations (version)
+          VALUES ('001_initial_schema.sql')
+          ON CONFLICT (version) DO NOTHING;
+        `);
+      }
+
+      // Get applied migrations
+      const appliedResult = await client.query('SELECT version FROM schema_migrations ORDER BY version');
+      const appliedMigrations = new Set(appliedResult.rows.map((row: any) => row.version));
+
+      // Get migration files
+      const migrationsDir = join(__dirname, '..', '..', 'migrations');
+      let migrationFiles: string[] = [];
+
+      try {
+        migrationFiles = readdirSync(migrationsDir)
+          .filter(file => file.endsWith('.sql'))
+          .sort(); // Ensure they run in order
+      } catch (error) {
+        console.log('📁 No migrations directory found, skipping migrations');
+        return;
+      }
+
+      const pendingMigrations = migrationFiles.filter(file => !appliedMigrations.has(file));
+
+      if (pendingMigrations.length === 0) {
+        console.log('✅ All migrations are up to date');
+        return;
+      }
+
+      console.log(`🔄 Running ${pendingMigrations.length} pending migration(s)...`);
+
+      for (const migrationFile of pendingMigrations) {
+        console.log(`📝 Running migration: ${migrationFile}`);
+
+        try {
+          const migrationPath = join(migrationsDir, migrationFile);
+          const migrationSql = readFileSync(migrationPath, 'utf-8');
+
+          await client.query('BEGIN');
+          await client.query(migrationSql);
+          await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [migrationFile]);
+          await client.query('COMMIT');
+
+          console.log(`✅ Migration ${migrationFile} completed successfully`);
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw new Error(`Migration ${migrationFile} failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      console.log('🎉 All migrations completed successfully!');
+    } catch (error) {
+      console.error('❌ Migration error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manual migration runner - can be called directly
+   * @returns Promise<void>
+   */
+  async runMigrations(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await this.runPendingMigrations(client);
     } finally {
       client.release();
     }
