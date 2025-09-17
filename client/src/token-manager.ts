@@ -48,10 +48,11 @@ export class TokenManager {
    */
   async createMintToken(
     productId: string,
-    payerKeypair: Keypair
+    payerKeypair: Keypair,
+    originalData?: any
   ): Promise<{ signature: string; hash: string }> {
     const payer = payerKeypair;
-    const hashes = await this.getVisibilityHashes(productId);
+    const hashes = await this.getVisibilityHashes(productId, originalData);
 
     const existingSignature = await this.getSignatureFromId(productId);
     if (existingSignature && existingSignature !== "" && existingSignature !== "demo-signature-placeholder") {
@@ -156,11 +157,13 @@ export class TokenManager {
    * Mint or update tokens for several products concurrently, preserving order.
    * @param productIds  Array of product UIDs.
    * @param concurrency Maximum parallel jobs handled by Bottleneck.
+   * @param originalDataMap Optional map of original data for hash calculation
    */
   async batchMintToken(
     productIds: string[],
     payerKeypair: Keypair,
-    concurrency = 10
+    concurrency = 10,
+    originalDataMap?: Map<string, any>
   ): Promise<MintResult[]> {
     const metadataArray = await this.getMetadataFromIdArray(productIds);
     
@@ -177,8 +180,9 @@ export class TokenManager {
       limiter.schedule(async () => {
         try {
           let signature: string, hash: string;
+          const originalData = originalDataMap?.get(id);
           if (!(await this.checkSignatureById(id))) {
-            ({ signature, hash } = await this.createMintToken(id, payerKeypair));
+            ({ signature, hash } = await this.createMintToken(id, payerKeypair, originalData));
           } else {
             ({ signature, hash } = await this.updateMintToken(id, payerKeypair));
           }
@@ -428,11 +432,27 @@ export class TokenManager {
    * Get visibility-based hashes for public, owner, and brand levels
    * Uses DPPField accessibilityLevel - same logic as calculateProductHash
    */
-  private async getVisibilityHashes(productId: string): Promise<{
+  private async getVisibilityHashes(productId: string, originalData?: any): Promise<{
     publicHash: string;
     ownerHash: string;
     brandHash: string;
   }> {
+    if (originalData) {
+      // Use original data if provided (for creation)
+      const { ValidationUtils } = require('./validation');
+
+      const publicData = ValidationUtils.filterProductByAccess(originalData.info, 'public');
+      const ownerData = ValidationUtils.filterProductByAccess(originalData.info, 'owner');
+      const brandData = ValidationUtils.filterProductByAccess(originalData.info, 'private');
+
+      return {
+        publicHash: this.hashObject(JSON.stringify(publicData)),
+        ownerHash: this.hashObject(JSON.stringify(ownerData)),
+        brandHash: this.hashObject(JSON.stringify(brandData))
+      };
+    }
+
+    // Fallback to database reconstruction (for existing products)
     const client = await this.pool.connect();
 
     try {
@@ -456,14 +476,11 @@ export class TokenManager {
       const ownerData = ValidationUtils.filterProductByAccess(completeProduct, 'owner');
       const brandData = ValidationUtils.filterProductByAccess(completeProduct, 'private');
 
-
       const hashes = {
         publicHash: this.hashObject(JSON.stringify(publicData)),
         ownerHash: this.hashObject(JSON.stringify(ownerData)),
         brandHash: this.hashObject(JSON.stringify(brandData))
       };
-
-
 
       return hashes;
     } finally {

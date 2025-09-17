@@ -215,7 +215,14 @@ export class SafeoutSDK {
 
     // Mint tokens for all products
     const productIds = createdProducts.map((p: any) => p.id);
-    const mintResults = await this.tokenManager!.batchMintToken(productIds, this.mintAuthorityKeypair!);
+
+    // Create a map of original data for proper hash calculation
+    const originalDataMap = new Map<string, any>();
+    productsData.forEach(productData => {
+      originalDataMap.set(productData.productUid, productData);
+    });
+
+    const mintResults = await this.tokenManager!.batchMintToken(productIds, this.mintAuthorityKeypair!, 10, originalDataMap);
 
     // Record history for all products
     const normalizedUser = ValidationUtils.normalizeUserName(changedBy);
