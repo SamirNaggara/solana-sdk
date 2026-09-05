@@ -19,6 +19,27 @@ const results = await sdk.checkAuthenticityOnBlockchain([{ productId: product.id
 
 The `solana-dpp` SDK enables minting SPL tokens with embedded hashed metadata via memo instructions and provides a complete API for managing digital product passports on the Solana blockchain.
 
+> **Open source (MIT).** Ce SDK est né chez [Safeout](https://www.linkedin.com/in/naggara-samir/), la solution d'authentification anti-contrefaçon dont j'étais le CTO, et a été soutenu par un grant de la Solana Foundation. Il est aujourd'hui entièrement open source et libre d'usage.
+
+## Quick example
+
+```ts
+import { SolanaDppSdk } from 'solana-dpp';
+
+const sdk = new SolanaDppSdk();
+await sdk.init({ rpcUrl: process.env.SOLANA_RPC_URL, databaseUrl: process.env.DATABASE_URL });
+
+// Mint a Digital Product Passport for one product
+const [product] = await sdk.createDppProducts([
+  { name: 'Watch #001', metadata: { brand: 'Acme', serial: 'A-001' } },
+]);
+
+// Later, verify authenticity from the on-chain hash
+const [check] = await sdk.checkAuthenticityOnBlockchain([{ productId: product.id }]);
+console.log(check.authentic); // true
+```
+
+
 ## Features
 
 - 🚀 **Ultra-simple API** - Empty constructor, all config in `init()`
@@ -590,3 +611,12 @@ MIT
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Authors
+
+- **Samir Naggara** — [@SamirNaggara](https://github.com/SamirNaggara)
+- **Axel Giguaire** — [@MrFeuylle](https://github.com/MrFeuylle)
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

@@ -1,7 +1,7 @@
 {
   "name": "solana-dpp",
   "version": "1.5.0",
-  "description": "TypeScript SDK for Digital Product Passports on Solana: SPL mint with hashed metadata, PostgreSQL storage, authenticity verification",
+  "description": "Open-source TypeScript SDK for Digital Product Passports (DPP) on Solana: mint SPL tokens with hashed metadata, PostgreSQL storage, on-chain authenticity verification.",
   "main": "dist/client/solana-dpp-sdk.js",
   "types": "dist/client/solana-dpp-sdk.d.ts",
   "files": [
@@ -67,13 +67,7 @@
     "typescript": "^5.8.3"
   },
   "contributors": [
-    {
-      "name": "Samir Naggara",
-      "url": "https://github.com/SamirNaggara"
-    },
-    {
-      "name": "Axel Giguaire",
-      "url": "https://github.com/MrFeuylle"
-    }
+    "Samir Naggara <samirm.nagg@gmail.com> (https://github.com/SamirNaggara)",
+    "Axel Giguaire (https://github.com/MrFeuylle)"
   ]
 }
