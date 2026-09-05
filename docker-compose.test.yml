@@ -6,14 +6,14 @@ services:
     container_name: solana-dpp-test-db
     environment:
       POSTGRES_DB: sdk-1
-      POSTGRES_USER: safeout
+      POSTGRES_USER: dpp
       POSTGRES_PASSWORD: pide
     ports:
       - "4242:5432"  # Port matching .env.test configuration
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U safeout -d sdk-1"]
+      test: ["CMD-SHELL", "pg_isready -U dpp -d sdk-1"]
       interval: 5s
       timeout: 5s
       retries: 5

@@ -1,16 +1,16 @@
-import { SafeoutSDK } from '../client/class_safeout';
+import { SolanaDppSdk } from '../client/solana-dpp-sdk';
 import { ProductInput } from '../client/src/types';
 import { v4 as uuidv4 } from 'uuid';
 
 describe('Simple Blockchain Workflow Test', () => {
-  let sdk: SafeoutSDK;
+  let sdk: SolanaDppSdk;
   let createdProducts: string[] = [];
 
   beforeAll(async () => {
     // Initialize SDK with test database and keys
-    sdk = new SafeoutSDK();
+    sdk = new SolanaDppSdk();
     await sdk.init({
-      databaseUrl: process.env.DATABASE_URL || "postgresql://safeout:pide@localhost:4242/sdk-1",
+      databaseUrl: process.env.DATABASE_URL || "postgresql://dpp:dpp@localhost:4242/sdk-1",
       rpcUrl: "https://api.devnet.solana.com",
       mintAuthorityPrivateKey: process.env.MINT_AUTHORITY_PRIVATE_KEY,
       ownerPrivateKey: process.env.OWNER_PRIVATE_KEY

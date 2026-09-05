@@ -1,16 +1,16 @@
-import { SafeoutSDK } from '../client/class_safeout';
+import { SolanaDppSdk } from '../client/solana-dpp-sdk';
 import { ProductInput } from '../client/src/types';
 import { v4 as uuidv4 } from 'uuid';
 import 'dotenv/config';
 
 describe('Detailed Object Comparison Test', () => {
-  let sdk: SafeoutSDK;
+  let sdk: SolanaDppSdk;
   const testProductId = uuidv4();
 
   beforeAll(async () => {
-    sdk = new SafeoutSDK();
+    sdk = new SolanaDppSdk();
     await sdk.init({
-      databaseUrl: process.env.DATABASE_URL || "postgresql://safeout:pide@localhost:4242/sdk-1",
+      databaseUrl: process.env.DATABASE_URL || "postgresql://dpp:dpp@localhost:4242/sdk-1",
       rpcUrl: "https://api.devnet.solana.com",
       mintAuthorityPrivateKey: process.env.MINT_AUTHORITY_PRIVATE_KEY,
       ownerPrivateKey: process.env.OWNER_PRIVATE_KEY
@@ -62,7 +62,7 @@ describe('Detailed Object Comparison Test', () => {
           accessibilityLevel: "public"
         },
         digitalLink: {
-          value: `https://app.safeout.io/product/sf:${testProductId}`,
+          value: `https://example.com/product/sf:${testProductId}`,
           accessibilityLevel: "public"
         },
         signature: {

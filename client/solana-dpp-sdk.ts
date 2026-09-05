@@ -18,9 +18,9 @@ import { ProductInput, CompleteProduct, MintResult, AuthenticityResult } from ".
 export type { ProductInput, CompleteProduct, MintResult, AuthenticityResult } from "./src/types";
 
 /**
- * Configuration interface for SafeoutSDK initialization
+ * Configuration interface for SolanaDppSdk initialization
  */
-export interface SafeoutConfig {
+export interface SolanaDppConfig {
   databaseUrl: string;
   rpcUrl?: string; // default: 'https://api.devnet.solana.com'
   mintAuthorityPrivateKey?: string;
@@ -28,9 +28,9 @@ export interface SafeoutConfig {
 }
 
 /**
- * SafeoutSDK - Main SDK class for managing digital product passports (DPP) on Solana blockchain
+ * SolanaDppSdk - Main SDK class for managing digital product passports (DPP) on Solana blockchain
  */
-export class SafeoutSDK {
+export class SolanaDppSdk {
   // Simple parameters with defaults
   private rpcUrl: string = 'https://api.devnet.solana.com';
   private hashAlgo: string = "sha256";
@@ -48,7 +48,7 @@ export class SafeoutSDK {
   private historyManager: HistoryManager | null = null;
 
   /**
-   * Create a new SafeoutSDK instance
+   * Create a new SolanaDppSdk instance
    */
   constructor() {
     // Empty constructor - all configuration happens in init()
@@ -58,7 +58,7 @@ export class SafeoutSDK {
    * Initialize the SDK with configuration
    * @param config - Configuration object
    */
-  public async init(config: SafeoutConfig): Promise<void> {
+  public async init(config: SolanaDppConfig): Promise<void> {
     // Set simple parameters with defaults
     this.rpcUrl = config.rpcUrl || this.rpcUrl;
 
@@ -106,7 +106,7 @@ export class SafeoutSDK {
 
     this.historyManager = new HistoryManager(this.databaseManager!.getPool());
 
-    console.log('SafeoutSDK initialized successfully');
+    console.log('SolanaDppSdk initialized successfully');
   }
 
   /**

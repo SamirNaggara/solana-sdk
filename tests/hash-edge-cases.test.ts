@@ -1,11 +1,11 @@
-import { SafeoutSDK } from '../client/class_safeout';
+import { SolanaDppSdk } from '../client/solana-dpp-sdk';
 import { ProductInput } from '../client/src/types';
 
 describe('Hash Edge Cases', () => {
-  let sdk: SafeoutSDK;
+  let sdk: SolanaDppSdk;
 
   beforeAll(() => {
-    sdk = new SafeoutSDK();
+    sdk = new SolanaDppSdk();
   });
 
   test('should handle empty arrays in material composition', () => {

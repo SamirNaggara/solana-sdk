@@ -15,5 +15,5 @@ if (fs.existsSync(envPath)) {
 
 // Set default DATABASE_URL if not set
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "postgresql://safeout:pide@localhost:4242/sdk-1?schema=public";
+  process.env.DATABASE_URL = "postgresql://dpp:dpp@localhost:4242/sdk-1?schema=public";
 }

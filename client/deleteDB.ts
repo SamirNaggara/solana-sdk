@@ -1,6 +1,6 @@
 import { Client } from 'pg';
 
-const databaseUrl = "postgresql://safeout:pide@localhost:5432/template_db?schema=public";
+const databaseUrl = "postgresql://dpp:dpp@localhost:5432/template_db?schema=public";
 
 async function deleteAllData() {
   const client = new Client({

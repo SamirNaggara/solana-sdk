@@ -1,5 +1,5 @@
 import readline from "node:readline";
-import { ProductInput, SafeoutSDK } from "./class_safeout";
+import { ProductInput, SolanaDppSdk } from "./solana-dpp-sdk";
 
 // Load environment variables FIRST
 require("dotenv").config();
@@ -8,7 +8,7 @@ require("dotenv").config();
 /*  Instance SDK (ultra-simplified API)                                      */
 /* -------------------------------------------------------------------------- */
 
-const sdk = new SafeoutSDK();
+const sdk = new SolanaDppSdk();
 /* -------------------------------------------------------------------------- */
 /*  Helpers I/O                                                               */
 /* -------------------------------------------------------------------------- */
@@ -242,16 +242,16 @@ async function mainLoop() {
   }
 
   try {
-    console.log("🔄 Initializing SafeoutSDK...");
+    console.log("🔄 Initializing SolanaDppSdk...");
     await sdk.init({
       databaseUrl: dbUrl,
       rpcUrl: process.env.SOLANA_RPC_URL, // optional, defaults to devnet
       mintAuthorityPrivateKey: process.env.MINT_AUTHORITY_PRIVATE_KEY, // optional
       ownerPrivateKey: process.env.OWNER_PRIVATE_KEY, // optional
     });
-    console.log("✅ SafeoutSDK initialized successfully\n");
+    console.log("✅ SolanaDppSdk initialized successfully\n");
   } catch (error) {
-    console.error("❌ Failed to initialize SafeoutSDK:", error);
+    console.error("❌ Failed to initialize SolanaDppSdk:", error);
     process.exit(1);
   }
   for (;;) {

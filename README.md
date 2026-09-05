@@ -1,6 +1,21 @@
 # solana-dpp
 
-**TypeScript SDK for creating and managing Digital Product Passports (DPP) on Solana blockchain with secure metadata storage.**
+**TypeScript SDK for creating and managing Digital Product Passports (DPP) on Solana, with hashed metadata on-chain and PostgreSQL storage off-chain.**
+
+Fully open source, MIT licensed. Born at [Safeout](https://www.linkedin.com/company/safeout-official) in 2025, where it powered product authentication on Solana. Its development was supported by a Solana grant, which is why it is published here in full.
+
+**Authors:** [Samir Naggara](https://github.com/SamirNaggara) and [Axel Giguaire](https://github.com/MrFeuylle).
+
+## In five lines
+
+```typescript
+import { SolanaDppSdk } from 'solana-dpp';
+
+const sdk = new SolanaDppSdk();
+await sdk.init({ databaseUrl: process.env.DATABASE_URL!, rpcUrl: 'https://api.devnet.solana.com' });
+const [product] = await sdk.createDppProducts([{ name: 'Watch 001', serial: 'W-001', brand: 'Acme' }]);
+const results = await sdk.checkAuthenticityOnBlockchain([{ productId: product.id }]);
+```
 
 The `solana-dpp` SDK enables minting SPL tokens with embedded hashed metadata via memo instructions and provides a complete API for managing digital product passports on the Solana blockchain.
 
@@ -47,9 +62,9 @@ npm install solana-dpp
 ### Basic Usage
 
 ```typescript
-import { SafeoutSDK } from 'solana-dpp';
+import { SolanaDppSdk } from 'solana-dpp';
 
-const sdk = new SafeoutSDK();
+const sdk = new SolanaDppSdk();
 
 await sdk.init({
   databaseUrl: "postgresql://user:pass@localhost:5432/database",
@@ -70,7 +85,7 @@ const product = products[0]; // Get the first (and only) product
 ### Configuration Options
 
 ```typescript
-interface SafeoutConfig {
+interface SolanaDppConfig {
   databaseUrl: string;                    // Required: PostgreSQL connection
   rpcUrl?: string;                       // Optional: Solana RPC (default: devnet)
   mintAuthorityPrivateKey?: string;      // Optional: Private key as JSON array
@@ -83,9 +98,9 @@ interface SafeoutConfig {
 ### Initialization
 
 #### `constructor()`
-Creates a new SafeoutSDK instance with empty constructor.
+Creates a new SolanaDppSdk instance with empty constructor.
 
-#### `init(config: SafeoutConfig): Promise<void>`
+#### `init(config: SolanaDppConfig): Promise<void>`
 Initializes the SDK with configuration. Must be called before using other methods.
 
 ### Product Management
@@ -443,7 +458,7 @@ Available actions:
 
 ## Architecture
 
-- **SafeoutSDK** - Main API class
+- **SolanaDppSdk** - Main API class
 - **DatabaseManager** - PostgreSQL operations
 - **TokenManager** - Solana blockchain operations
 - **MintManager** - Token minting operations
@@ -485,7 +500,7 @@ For integration tests, a PostgreSQL test database is automatically configured:
 # Start test database with Docker
 docker run -d --name solana-dpp-test-db \
   -e POSTGRES_DB=sdk-1 \
-  -e POSTGRES_USER=safeout \
+  -e POSTGRES_USER=dpp \
   -e POSTGRES_PASSWORD=pide \
   -p 4242:5432 postgres:15-alpine
 ```
@@ -501,7 +516,7 @@ The SDK includes an automatic migration system that ensures your database schema
 Migrations run automatically when you initialize the SDK:
 
 ```typescript
-const sdk = new SafeoutSDK();
+const sdk = new SolanaDppSdk();
 await sdk.init({
   databaseUrl: "postgresql://user:password@localhost:5432/database",
   rpcUrl: "https://api.devnet.solana.com"
@@ -537,7 +552,7 @@ npm run db:setup
 ### Manual Migration via API
 
 ```typescript
-const sdk = new SafeoutSDK();
+const sdk = new SolanaDppSdk();
 await sdk.init({...});
 
 // Run migrations manually
@@ -571,3 +586,7 @@ New migrations are automatically detected and applied when you update the SDK ve
 ## License
 
 MIT
+
+## License
+
+MIT. See [LICENSE](LICENSE).

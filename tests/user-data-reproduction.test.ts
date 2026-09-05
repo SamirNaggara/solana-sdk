@@ -1,14 +1,14 @@
-import { SafeoutSDK } from '../client/class_safeout';
+import { SolanaDppSdk } from '../client/solana-dpp-sdk';
 import { ProductInput } from '../client/src/types';
 
 describe('User Data Reproduction Test', () => {
-  let sdk: SafeoutSDK;
+  let sdk: SolanaDppSdk;
   const testProductId = "b12a9eb7-70fd-4d9a-a4c0-55deef7d32d5";
 
   beforeAll(async () => {
-    sdk = new SafeoutSDK();
+    sdk = new SolanaDppSdk();
     await sdk.init({
-      databaseUrl: process.env.DATABASE_URL || "postgresql://safeout:pide@localhost:4242/sdk-1",
+      databaseUrl: process.env.DATABASE_URL || "postgresql://dpp:dpp@localhost:4242/sdk-1",
       rpcUrl: "https://api.devnet.solana.com",
       mintAuthorityPrivateKey: process.env.MINT_AUTHORITY_PRIVATE_KEY,
       ownerPrivateKey: process.env.OWNER_PRIVATE_KEY
@@ -57,7 +57,7 @@ describe('User Data Reproduction Test', () => {
           "accessibilityLevel": "public"
         },
         "digitalLink": {
-          "value": "https://app.safeout.io/product/sf:b12a9eb7-70fd-4d9a-a4c0-55deef7d32d5",
+          "value": "https://example.com/product/sf:b12a9eb7-70fd-4d9a-a4c0-55deef7d32d5",
           "accessibilityLevel": "public"
         },
         "signature": {

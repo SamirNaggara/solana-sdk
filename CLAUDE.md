@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SafeoutSDK is a TypeScript SDK for creating, verifying, and managing Solana SPL tokens with secure metadata storage via memo instructions. The project enables minting tokens with embedded hashed metadata and provides a complete API for managing digital product passports (DPP) on the Solana blockchain.
+SolanaDppSdk is a TypeScript SDK for creating, verifying, and managing Solana SPL tokens with secure metadata storage via memo instructions. The project enables minting tokens with embedded hashed metadata and provides a complete API for managing digital product passports (DPP) on the Solana blockchain.
 
 ## Common Commands
 
@@ -28,7 +28,7 @@ SafeoutSDK is a TypeScript SDK for creating, verifying, and managing Solana SPL 
 ## Architecture
 
 ### Core Structure
-- **client/class_safeout.ts** - Main SDK class (`SafeoutSDK`) that orchestrates all operations
+- **client/solana-dpp-sdk.ts** - Main SDK class (`SolanaDppSdk`) that orchestrates all operations
 - **client/src/** - Core implementation modules:
   - `database-manager.ts` - PostgreSQL database operations
   - `token-manager.ts` - Solana token operations and metadata handling
@@ -41,7 +41,7 @@ SafeoutSDK is a TypeScript SDK for creating, verifying, and managing Solana SPL 
 - **client/SchemaZod.ts** - Zod validation schemas
 
 ### Key Design Patterns
-The SDK uses a modular manager pattern where `SafeoutSDK` coordinates specialized managers:
+The SDK uses a modular manager pattern where `SolanaDppSdk` coordinates specialized managers:
 - Each manager handles a specific domain (database, tokens, minting, history)
 - Managers are lazily initialized when needed
 - The main class provides a unified interface for all operations
@@ -73,7 +73,7 @@ Required environment variables (see `.env.example`):
 ## Development Notes
 
 - The project compiles TypeScript from `client/` to `dist/`
-- Main entry point is `client/class_safeout.ts`
+- Main entry point is `client/solana-dpp-sdk.ts`
 - Uses Solana Web3.js v1.98.2 and SPL Token libraries
 - Database operations require PostgreSQL setup
 - All Solana operations work with devnet/testnet/mainnet configuration

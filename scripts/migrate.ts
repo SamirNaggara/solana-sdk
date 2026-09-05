@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { SafeoutSDK } from '../client/class_safeout';
+import { SolanaDppSdk } from '../client/solana-dpp-sdk';
 import * as dotenv from 'dotenv';
 
 async function runMigrations() {
@@ -8,12 +8,12 @@ async function runMigrations() {
 
   console.log('🚀 Starting database migrations...');
 
-  const sdk = new SafeoutSDK();
+  const sdk = new SolanaDppSdk();
 
   try {
     // Initialize with database connection only (no Solana/crypto needed for migrations)
     await sdk.init({
-      databaseUrl: process.env.DATABASE_URL || "postgresql://localhost:5432/safeout",
+      databaseUrl: process.env.DATABASE_URL || "postgresql://localhost:5432/dpp",
       rpcUrl: "https://api.devnet.solana.com", // dummy, not used for migrations
     });
 

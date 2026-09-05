@@ -1,9 +1,9 @@
 {
   "name": "solana-dpp",
   "version": "1.5.0",
-  "description": "TypeScript SDK for creating and managing Digital Product Passports (DPP) on Solana blockchain with secure metadata storage",
-  "main": "dist/client/class_safeout.js",
-  "types": "dist/client/class_safeout.d.ts",
+  "description": "TypeScript SDK for Digital Product Passports on Solana: SPL mint with hashed metadata, PostgreSQL storage, authenticity verification",
+  "main": "dist/client/solana-dpp-sdk.js",
+  "types": "dist/client/solana-dpp-sdk.d.ts",
   "files": [
     "dist",
     "migrations"
@@ -13,14 +13,14 @@
   },
   "keywords": [
     "solana",
-    "blockchain",
+    "spl-token",
     "digital-product-passport",
     "dpp",
-    "spl-token",
+    "sdk",
     "typescript",
-    "sdk"
+    "authenticity"
   ],
-  "author": "Samir <samir@safeout.io>",
+  "author": "Samir Naggara <samirm.nagg@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -29,16 +29,16 @@
   "bugs": {
     "url": "https://github.com/SamirNaggara/solana-sdk/issues"
   },
-  "homepage": "https://github.com/SamirNaggara/solana-sdk#readme",
+  "homepage": "https://github.com/SamirNaggara/solana-sdk",
   "scripts": {
     "start": "ts-node client/cli.ts",
     "build": "tsc",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:mint": "jest --testNamePattern='Mint Management'",
-    "test:mint:unit": "jest __tests__/SafeoutSDK.mintManagement.test.ts",
-    "test:mint:integration": "jest __tests__/SafeoutSDK.mintManagement.integration.test.ts",
-    "test:user-normalization": "jest __tests__/SafeoutSDK.userNormalization.test.ts",
+    "test:mint:unit": "jest __tests__/SolanaDppSdk.mintManagement.test.ts",
+    "test:mint:integration": "jest __tests__/SolanaDppSdk.mintManagement.integration.test.ts",
+    "test:user-normalization": "jest __tests__/SolanaDppSdk.userNormalization.test.ts",
     "test:authenticity": "jest tests/authenticity-verification.test.ts",
     "db:migrate": "ts-node scripts/migrate.ts",
     "db:setup": "npm run db:migrate"
@@ -65,5 +65,15 @@
     "ts-jest": "^29.4.0",
     "ts-node": "^10.4.0",
     "typescript": "^5.8.3"
-  }
+  },
+  "contributors": [
+    {
+      "name": "Samir Naggara",
+      "url": "https://github.com/SamirNaggara"
+    },
+    {
+      "name": "Axel Giguaire",
+      "url": "https://github.com/MrFeuylle"
+    }
+  ]
 }
