@@ -396,8 +396,8 @@ DATABASE_URL="postgresql://user:password@localhost:5432/database"
 
 # Optional - Solana Configuration
 SOLANA_RPC_URL="https://api.devnet.solana.com"
-MINT_AUTHORITY_PRIVATE_KEY="[12,34,56,...]"
-OWNER_PRIVATE_KEY="[12,34,56,...]"
+MINT_AUTHORITY_PRIVATE_KEY="[<64 comma-separated bytes of the keypair secret key>]"
+OWNER_PRIVATE_KEY="[<64 comma-separated bytes of the keypair secret key>]"
 ```
 
 ## Database

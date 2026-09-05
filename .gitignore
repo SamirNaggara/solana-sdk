@@ -1,9 +1,8 @@
 *keypair.json
 .env
 !.env.example
-!.env.test
 dist
 node_modules
 /generated/prisma
 Milestone
-mint-config.json
+mint-config.json.env.test
