@@ -614,8 +614,8 @@ MIT. See [LICENSE](LICENSE).
 
 ## Authors
 
-- **Samir Naggara** — [@SamirNaggara](https://github.com/SamirNaggara)
-- **Axel Giguaire** — [@MrFeuylle](https://github.com/MrFeuylle)
+- **Samir Naggara** : [@SamirNaggara](https://github.com/SamirNaggara)
+- **Axel Giguaire** : [@MrFeuylle](https://github.com/MrFeuylle)
 
 ## License
 
