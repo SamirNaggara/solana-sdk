@@ -1,5 +1,7 @@
 # solana-dpp
 
+[![CI](https://github.com/SamirNaggara/solana-sdk/actions/workflows/test.yml/badge.svg)](https://github.com/SamirNaggara/solana-sdk/actions/workflows/test.yml) [![npm](https://img.shields.io/npm/v/solana-dpp)](https://www.npmjs.com/package/solana-dpp) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **TypeScript SDK for creating and managing Digital Product Passports (DPP) on Solana, with hashed metadata on-chain and PostgreSQL storage off-chain.**
 
 Fully open source, MIT licensed. Born at [Safeout](https://www.linkedin.com/company/safeout-official) in 2025, where it powered product authentication on Solana. Its development was supported by a Solana grant, which is why it is published here in full.
@@ -488,45 +490,16 @@ Available actions:
 
 ## Testing
 
-The SDK includes comprehensive test suites covering all functionality:
+Two levels of tests:
 
-### Running Tests
+- **Unit tests** (`npm run test:unit`): hash calculation and edge cases. No database, no network. This is what CI runs on every push.
+- **Integration tests** (`npm run test:integration`, or `npm test`): full workflow against PostgreSQL and Solana devnet. They need `DATABASE_URL`, and a funded devnet wallet in `MINT_AUTHORITY_PRIVATE_KEY` and `OWNER_PRIVATE_KEY` (see `.env.example`). In CI they run only when those two repository secrets are set.
 
 ```bash
-# Run all tests
-npm test
-
-# Run specific test categories
-npm run test:mint              # Mint management tests
-npm run test:authenticity      # Authenticity verification tests
-npm run test:user-normalization # User normalization tests
-
-# Run in watch mode
+npm run test:unit          # fast, offline
+npm run test:integration   # PostgreSQL + devnet, needs a funded wallet
 npm run test:watch
 ```
-
-### Test Categories
-
-- **Hash Calculation Tests**: Pure hash computation without database dependencies
-- **Integration Tests**: Full workflow with PostgreSQL database
-- **Authenticity Verification**: Blockchain verification logic
-- **Edge Cases**: Unicode, special characters, and boundary conditions
-- **Performance Tests**: Hash calculation performance benchmarks
-
-### Test Database Setup
-
-For integration tests, a PostgreSQL test database is automatically configured:
-
-```bash
-# Start test database with Docker
-docker run -d --name solana-dpp-test-db \
-  -e POSTGRES_DB=sdk-1 \
-  -e POSTGRES_USER=dpp \
-  -e POSTGRES_PASSWORD=pide \
-  -p 4242:5432 postgres:15-alpine
-```
-
-The test suite includes both unit tests (no external dependencies) and integration tests (with database).
 
 ## Database Migrations
 

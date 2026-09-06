@@ -1,4 +1,4 @@
-name: Run Jest Tests
+name: CI
 
 on:
   pull_request:
@@ -7,9 +7,25 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  unit:
+    name: Unit tests
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:unit
 
+  integration:
+    # Needs a funded devnet wallet. Runs only when the repository secrets
+    # MINT_AUTHORITY_PRIVATE_KEY and OWNER_PRIVATE_KEY are set (never on forks).
+    name: Integration tests (devnet)
+    runs-on: ubuntu-latest
+    needs: unit
     services:
       postgres:
         image: postgres:15
@@ -24,26 +40,30 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-
+    env:
+      DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb?schema=public
+      MINT_AUTHORITY_PRIVATE_KEY: ${{ secrets.MINT_AUTHORITY_PRIVATE_KEY }}
+      OWNER_PRIVATE_KEY: ${{ secrets.OWNER_PRIVATE_KEY }}
     steps:
-      - name: Checkout code
+      - name: Check devnet secrets
+        id: gate
+        run: |
+          if [ -n "$MINT_AUTHORITY_PRIVATE_KEY" ] && [ -n "$OWNER_PRIVATE_KEY" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Devnet secrets not set, skipping integration tests."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
+      - if: steps.gate.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 18
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Set up database
-        env:
-          DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb?schema=public
+          node-version: 20
+          cache: npm
+      - if: steps.gate.outputs.run == 'true'
+        run: npm ci
+      - if: steps.gate.outputs.run == 'true'
         run: npm run db:setup
-
-      - name: Run tests
-        env:
-          DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb?schema=public
-        run: npm test
-
+      - if: steps.gate.outputs.run == 'true'
+        run: npm run test:integration
