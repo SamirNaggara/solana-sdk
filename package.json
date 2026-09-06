@@ -1,6 +1,6 @@
 {
   "name": "solana-dpp",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "description": "Open-source TypeScript SDK for Digital Product Passports (DPP) on Solana: mint SPL tokens with hashed metadata, PostgreSQL storage, on-chain authenticity verification.",
   "main": "dist/client/solana-dpp-sdk.js",
   "types": "dist/client/solana-dpp-sdk.d.ts",
